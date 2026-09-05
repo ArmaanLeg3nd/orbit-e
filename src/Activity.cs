@@ -65,7 +65,6 @@ namespace Orbit
         public DateTime Updated { get; set; }
         public DateTime Ended { get; set; }
         public bool IsRoot { get; set; }
-        public string SessionRoot { get; set; }
         public List<ActivityEvent> Events = new List<ActivityEvent>();
         public Brush AccentBrush { get { return Palette.State(State); } }
         public Brush SoftBrush { get { return Palette.Color("#20FFFFFF"); } }
@@ -85,7 +84,7 @@ namespace Orbit
         public Agent Copy() { var copy = (Agent)MemberwiseClone(); copy.Events = new List<ActivityEvent>(Events); return copy; }
         public void Refresh(Agent next)
         {
-            ParentId = next.ParentId; Name = next.Name; Task = next.Task; State = next.State; Role = next.Role; Started = next.Started; Updated = next.Updated; Ended = next.Ended; IsRoot = next.IsRoot; SessionRoot = next.SessionRoot; Events = next.Events;
+            ParentId = next.ParentId; Name = next.Name; Task = next.Task; State = next.State; Role = next.Role; Started = next.Started; Updated = next.Updated; Ended = next.Ended; IsRoot = next.IsRoot; Events = next.Events;
             Notify();
         }
         public void Notify() { if (PropertyChanged != null) PropertyChanged(this, new PropertyChangedEventArgs("")); }
@@ -98,7 +97,6 @@ namespace Orbit
         public int Working;
         public bool NeedsAttention;
         public DateTime LastWriteUtc = DateTime.MinValue;
-        public bool IsFocused;
     }
     public sealed class Snapshot
     {
@@ -112,7 +110,6 @@ namespace Orbit
         public string FocusedSession = "";
         public bool Connected;
         public bool CatchingUp;
-        public string NewerRoot = "";
         public int TotalAgents;
         public int TotalSessions;
         public DateTime LastWriteUtc = DateTime.MinValue;
@@ -197,7 +194,6 @@ namespace Orbit
         private DateTime pinnedLookupAt;
         private string pinnedDirectory = "";
         private string selectedRoot = "";
-        private DateTime selectedRootAt = DateTime.MinValue;
 
         public ActivityReader(string project, string session, string events, string sessionDirectory)
         {
@@ -273,7 +269,6 @@ namespace Orbit
                     if (!pinned && orderedKeys.Count > 0)
                     {
                         focus = orderedKeys[0];
-                        if (focus != selectedRoot) selectedRootAt = DateTime.UtcNow;
                         selectedRoot = focus;
                     }
                     var visible = !pinned && !String.IsNullOrEmpty(focus) && feed.ContainsKey(focus) ? feed[focus] : null;
@@ -301,13 +296,12 @@ namespace Orbit
                     snapshot.Connected = snapshot.Agents.Count > 0;
                     snapshot.CatchingUp = catchingUp;
                     snapshot.LastWriteUtc = lastWrite;
-                    snapshot.NewerRoot = "";
                     snapshot.TotalAgents = snapshot.Agents.Count;
                     snapshot.TotalSessions = orderedKeys.Count;
                     snapshot.Sessions.Clear();
                     foreach (var key in orderedKeys)
                     {
-                        var summary = new SessionSummary { RootId = key, IsFocused = key == focus, LastWriteUtc = TeamWrite(feed[key]) };
+                        var summary = new SessionSummary { RootId = key, LastWriteUtc = TeamWrite(feed[key]) };
                         foreach (var file in feed[key])
                         {
                             summary.Agents++;
@@ -383,7 +377,6 @@ namespace Orbit
             if (String.IsNullOrEmpty(sessionFilter))
             {
                 var focus = PickFocus();
-                if (!String.IsNullOrEmpty(focus) && focus != selectedRoot) selectedRootAt = DateTime.UtcNow;
                 selectedRoot = focus;
             }
             if (sessions.Count > 200)
@@ -459,7 +452,7 @@ namespace Orbit
             var name = AgentName(meta, spawn, id, parent, started);
             var role = Json.Text(meta, "agent_role");
             if (role == "") role = Json.Text(spawn, "agent_role");
-            var agent = new Agent { Id = id, ParentId = parent, IsRoot = parent == "", Name = Json.Clean(name, 32), Role = role, Task = "Waiting for activity", State = "idle", Started = Json.Time(meta, "timestamp", file.CreationTimeUtc), Updated = file.LastWriteTimeUtc, SessionRoot = !String.IsNullOrEmpty(session) ? session : id };
+            var agent = new Agent { Id = id, ParentId = parent, IsRoot = parent == "", Name = Json.Clean(name, 32), Role = role, Task = "Waiting for activity", State = "idle", Started = Json.Time(meta, "timestamp", file.CreationTimeUtc), Updated = file.LastWriteTimeUtc };
             sessions[file.FullName] = new SessionFile { Path = file.FullName, RootId = session, DeclaredRootId = session, MetadataParentId = parent, Workspace = cwd, Agent = agent, InitialStarted = agent.Started };
         }
         private string AgentName(Dictionary<string, object> meta, Dictionary<string, object> spawn, string id, string parent, DateTime started)
@@ -549,7 +542,6 @@ namespace Orbit
                     }
                     current = parent;
                 }
-                file.Agent.SessionRoot = !String.IsNullOrEmpty(file.RootId) ? file.RootId : file.Agent.Id;
             }
         }
         private List<SessionFile> SelectTeam(string root)

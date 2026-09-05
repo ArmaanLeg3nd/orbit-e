@@ -29,7 +29,7 @@ The Windows .NET Framework 4.x desktop runtime/compiler is used directly; a sepa
 
 ## Live activity
 
-By default, Orbit reads the local `CODEX_HOME/sessions` directory (or the current user's `.codex/sessions`) and shows every active root session in the selected workspace, focusing the newest. It tracks each coordinator and its subagents, excluding internal guardian tasks. It reads files only; it does not start agents, modify Codex, submit approvals, or use the network.
+By default, Orbit reads the local `CODEX_HOME/sessions` directory (or the current user's `.codex/sessions`) , tracks every active root session in the selected workspace, and shows the newest focused team. It tracks the coordinator and its subagents, excluding internal guardian tasks. It reads files only; it does not start agents, modify Codex, submit approvals, or use the network.
 
 ```powershell
 .\bin\Orbit.exe --workspace 'D:\projects\my-project'
@@ -70,7 +70,7 @@ Close the existing instance before changing command-line source options. Switchi
 
 - **Best-effort local adapter.** Codex rollouts are an internal format, not a stable public API. The reader recognizes locally observed `session_meta`, `event_msg`, and `response_item` shapes and may need changes after a Codex upgrade. Unknown activity shapes are ignored; action classification is heuristic, not a complete command parser.
 - **Local sessions only.** Cloud-only sessions and agents that do not write accessible local rollouts are invisible. The recorded workspace must match the selected directory or a subdirectory of it; agents in another worktree/directory can be omitted. Use `--sessions-dir` when logs belong to a different profile or location. Other agent systems require the JSONL adapter above.
-- **No session picker or control plane.** Automatic mode lists every active session and focuses the newest; use `--session` to pin one. Source arguments are read at startup, and only one widget instance runs per Windows desktop session. Orbit cannot start/stop agents, answer input requests, or approve actions.
+- **No session picker or control plane.** Automatic mode tracks every active session, shows the newest focused team, and counts the rest in the footer; use `--session` to pin one. Source arguments are read at startup, and only one widget instance runs per Windows desktop session. Orbit cannot start/stop agents, answer input requests, or approve actions.
 - **Observed, delayed status.** Polling and buffered log writes introduce delay. Large logs can take multiple polls to catch up at startup, shown as `Catching up local Codex…`. The footer shows `Synced with local Codex`, `Synced … Xs ago`, or `last write HH:mm` so staleness is visible. “Synced” means local records were found, not that the Codex process is alive. Five-minute idle detection is a silence heuristic, not proof that work stopped; completion requires an explicit lifecycle or final-answer record.
 - **Bounded discovery and history.** Automatic discovery covers recent date folders (today, the previous three days, and tomorrow for date-boundary tolerance) and a flat directory, considering up to 160 recent files per scan. Historical pins search at most 400 date directories plus the pinned session's same-day files; older cross-day descendants can be missed. The UI shows at most 60 agents, keeps up to 40 events per agent in memory, and shows five inline. Initial reads start within the last 2 MiB of large logs, so earlier context may be absent. This is a live companion, not a complete audit archive.
 
