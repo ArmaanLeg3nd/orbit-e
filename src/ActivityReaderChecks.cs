@@ -76,7 +76,7 @@ namespace Orbit
             var loneFolder = Path.Combine(root, "names-lone-root");
             Session(loneFolder, "lone", "", "", root, null);
             var lone = new ActivityReader(root, "", "", loneFolder).Poll().Agents.Single(a => a.Id == "lone");
-            check(lone.Name == new DirectoryInfo(root).Name, "A nameless lead takes the workspace name instead of a Coordinator ID");
+            check(lone.Name == "Lead", "A nameless lead is called Lead instead of a Coordinator ID");
         }
 
         private static void CheckPendingCalls(Action<bool, string> check, string root)

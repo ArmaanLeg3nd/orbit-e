@@ -474,11 +474,7 @@ namespace Orbit
             if (name == "") name = Json.Text(meta, "agent_nickname");
             if (name == "") name = Json.Text(spawn, "agent_nickname");
             if (name != "") return name;
-            if (parent == "")
-            {
-                var project = new DirectoryInfo(workspace).Name;
-                return String.IsNullOrEmpty(project) ? "Lead" : project;
-            }
+            if (parent == "") return "Lead";
             return "Agent " + id.Substring(0, Math.Min(8, id.Length));
         }
         private void DiscoverPinned()
