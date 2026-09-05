@@ -80,7 +80,8 @@ namespace Orbit
             var loneFolder = Path.Combine(root, "names-lone-root");
             Session(loneFolder, "lone", "", "", root, null);
             var lone = new ActivityReader(root, "", "", loneFolder).Poll().Agents.Single(a => a.Id == "lone");
-            check(lone.Name == "Lead", "A nameless lead is called Lead instead of a Coordinator ID");
+            DateTime loneAt;
+            check(lone.Name.StartsWith("Session ") && DateTime.TryParse(lone.Name.Substring(8), out loneAt) && (DateTime.Now - loneAt).TotalMinutes < 5, "A nameless lead shows its session start time instead of a Coordinator ID");
         }
 
         private static void CheckPendingCalls(Action<bool, string> check, string root)

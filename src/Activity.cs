@@ -454,13 +454,14 @@ namespace Orbit
             if (parent == "") parent = Json.Text(spawn, "parent_thread_id");
             var id = Json.Text(meta, "id");
             var session = Json.Text(meta, "session_id");
-            var name = AgentName(meta, spawn, id, parent);
+            var started = Json.Time(meta, "timestamp", file.CreationTimeUtc);
+            var name = AgentName(meta, spawn, id, parent, started);
             var role = Json.Text(meta, "agent_role");
             if (role == "") role = Json.Text(spawn, "agent_role");
             var agent = new Agent { Id = id, ParentId = parent, IsRoot = parent == "", Name = Json.Clean(name, 32), Role = role, Task = "Waiting for activity", State = "idle", Started = Json.Time(meta, "timestamp", file.CreationTimeUtc), Updated = file.LastWriteTimeUtc, SessionRoot = !String.IsNullOrEmpty(session) ? session : id };
             sessions[file.FullName] = new SessionFile { Path = file.FullName, RootId = session, DeclaredRootId = session, MetadataParentId = parent, Workspace = cwd, Agent = agent, InitialStarted = agent.Started };
         }
-        private string AgentName(Dictionary<string, object> meta, Dictionary<string, object> spawn, string id, string parent)
+        private string AgentName(Dictionary<string, object> meta, Dictionary<string, object> spawn, string id, string parent, DateTime started)
         {
             var name = Json.Text(meta, "task_name");
             if (name == "") name = Json.Text(spawn, "task_name");
@@ -474,7 +475,7 @@ namespace Orbit
             if (name == "") name = Json.Text(meta, "agent_nickname");
             if (name == "") name = Json.Text(spawn, "agent_nickname");
             if (name != "") return name;
-            if (parent == "") return "Lead";
+            if (parent == "") return "Session " + started.ToLocalTime().ToString("HH:mm");
             return "Agent " + id.Substring(0, Math.Min(8, id.Length));
         }
         private void DiscoverPinned()
