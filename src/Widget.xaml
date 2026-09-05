@@ -26,7 +26,7 @@
       <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="AutomationProperties.Name" Value="{Binding AccessibleName}"/>
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TreeViewItem">
         <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="16"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-          <Border x:Name="Row" Grid.ColumnSpan="2" CornerRadius="8" Background="Transparent"/>
+          <Border x:Name="Row" Grid.Column="1" CornerRadius="8" Background="Transparent"/>
           <ToggleButton x:Name="Expander" Style="{StaticResource BranchToggle}" VerticalAlignment="Top" Margin="0,4,0,0" IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"/>
           <ContentPresenter Grid.Column="1" x:Name="PART_Header" ContentSource="Header" HorizontalAlignment="Stretch"/>
           <Border x:Name="ChildrenBorder" Grid.Row="1" Grid.Column="1" BorderBrush="#28FFFFFF" BorderThickness="1,0,0,0" Margin="-8,0,0,0" Padding="7,0,0,0"><ItemsPresenter x:Name="ItemsHost"/></Border>
