@@ -128,6 +128,8 @@ namespace Orbit
                     Check(liveWindow.IsVisible && Flatten(nativeTree.Items.Cast<TreeNode>()).Count(n => n.Kind == "agent") == 4, "Native tree starts with all four preview agents");
                     Check(liveWindow.Resources.Contains("SlimBar"), "Slim scrollbar style replaces the wide system bar");
                     Check(System.Windows.Controls.VirtualizingStackPanel.GetIsVirtualizing(nativeTree), "Agent feed virtualizes bot cards");
+                    Check(demo.Agents.All(a => !String.IsNullOrEmpty(a.AsciiAvatar) && a.AsciiAvatar.All(c => c < 128)), "Bot avatars are compact pure-ASCII faces");
+                    Check((System.Windows.Controls.StackPanel)liveWindow.FindName("SessionStrip") != null, "Session switcher strip is present for multi-session focus");
                     Check(((SolidColorBrush)nativeTree.Foreground).Color.R > 220, "Native tree text does not inherit the system's black foreground");
                     Check(liveWindow.AllowsTransparency && liveWindow.WindowStyle == WindowStyle.None && liveWindow.Topmost && !liveWindow.ShowInTaskbar, "Widget remains a frameless transparent topmost native window");
                     var glass = (LinearGradientBrush)((Border)liveWindow.FindName("Surface")).Background;

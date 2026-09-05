@@ -252,9 +252,13 @@ namespace Orbit
             // Stable teams rediscover every 5s; wait so the newer rollout is seen.
             Thread.Sleep(5200);
             var second = reader.Poll();
-            check(second.TotalSessions == 2 && second.Agents.Count == 2, "All active sessions stay visible instead of hiding the older team");
-            check(second.Session == "second-root" && second.FocusedSession == "second-root", "A newly created session takes focus while the older team remains listed");
-            check(second.Sessions.Count == 2 && second.Sessions[0].RootId == "second-root", "Session summaries order the newest active team first");
+            check(second.TotalSessions == 2 && second.Sessions.Count == 2, "All active sessions are tracked while the view focuses one");
+            check(second.Session == "second-root" && second.FocusedSession == "second-root", "A newly created session takes focus");
+            check(second.Agents.Count == 1 && second.Agents[0].Id == "second-root", "The focused team shows its own agents");
+            check(second.Sessions[0].RootId == "second-root", "Session summaries order the newest active team first");
+            reader.SetFocus("first-root");
+            var refocused = reader.Poll();
+            check(refocused.FocusedSession == "first-root" && refocused.Agents[0].Id == "first-root", "Manual focus switches the visible team without losing the others");
             check(second.Source.Contains("2 sessions"), "Freshness source counts visible sessions");
             check(second.LastWriteUtc != DateTime.MinValue && !second.CatchingUp, "Freshness tracks the last local write and backlog state");
 

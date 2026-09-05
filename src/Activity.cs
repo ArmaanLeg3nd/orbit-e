@@ -65,9 +65,21 @@ namespace Orbit
         public DateTime Updated { get; set; }
         public DateTime Ended { get; set; }
         public bool IsRoot { get; set; }
+        public string SessionRoot { get; set; }
         public List<ActivityEvent> Events = new List<ActivityEvent>();
         public Brush AccentBrush { get { return Palette.State(State); } }
         public Brush SoftBrush { get { return Palette.Color("#20FFFFFF"); } }
+        public string AsciiAvatar
+        {
+            get
+            {
+                var faces = new[] { "0_0", "o_o", "+_+", "x_x", "^_^", "=_=", "#_#", "o_O" };
+                var id = Id ?? "";
+                int hash = 0;
+                for (int i = 0; i < id.Length; i++) hash = (hash * 31 + id[i]) & 0x7fffffff;
+                return faces[hash % faces.Length];
+            }
+        }
         public string Glyph { get { return State == "completed" ? "\uE73E" : State == "attention" || State == "error" ? "\uE7BA" : Role == "explorer" ? "\uE721" : Role == "reviewer" ? "\uE73E" : Role == "tester" ? "\uE9D9" : IsRoot ? "\uE8D7" : "\uE943"; } }
         public string StatusLabel { get { return State == "working" ? "Working" : State == "waiting" ? "Waiting" : State == "completed" ? "Done" : State == "attention" ? "Needs you" : State == "error" ? "Error" : "Idle"; } }
         public string ChildLabel { get { return IsRoot ? "LEAD" : ""; } }
@@ -83,7 +95,7 @@ namespace Orbit
         public Agent Copy() { var copy = (Agent)MemberwiseClone(); copy.Events = new List<ActivityEvent>(Events); return copy; }
         public void Refresh(Agent next)
         {
-            ParentId = next.ParentId; Name = next.Name; Task = next.Task; State = next.State; Role = next.Role; Started = next.Started; Updated = next.Updated; Ended = next.Ended; IsRoot = next.IsRoot; Events = next.Events;
+            ParentId = next.ParentId; Name = next.Name; Task = next.Task; State = next.State; Role = next.Role; Started = next.Started; Updated = next.Updated; Ended = next.Ended; IsRoot = next.IsRoot; SessionRoot = next.SessionRoot; Events = next.Events;
             Notify();
         }
         public void Notify() { if (PropertyChanged != null) PropertyChanged(this, new PropertyChangedEventArgs("")); }
@@ -196,6 +208,8 @@ namespace Orbit
         private string pinnedDirectory = "";
         private string selectedRoot = "";
         private DateTime selectedRootAt = DateTime.MinValue;
+        private string manualFocus = "";
+        public void SetFocus(string root) { manualFocus = root ?? ""; }
 
         public ActivityReader(string project, string session, string events, string sessionDirectory)
         {
@@ -268,11 +282,29 @@ namespace Orbit
                         if (writeA != writeB) return writeB.CompareTo(writeA);
                         return String.Compare(a, b, StringComparison.Ordinal);
                     });
-                    if (!pinned && orderedKeys.Count > 0) { focus = orderedKeys[0]; selectedRoot = focus; selectedRootAt = DateTime.UtcNow; }
-                    var orderedAgents = new List<Agent>();
-                    foreach (var key in orderedKeys)
+                    if (!pinned && orderedKeys.Count > 0)
                     {
-                        var members = feed[key].OrderByDescending(f => f.Agent.IsRoot)
+                        var auto = orderedKeys[0];
+                        if (!String.IsNullOrEmpty(manualFocus) && !feed.ContainsKey(manualFocus)) manualFocus = "";
+                        focus = !String.IsNullOrEmpty(manualFocus) ? manualFocus : auto;
+                        if (focus != selectedRoot) selectedRootAt = DateTime.UtcNow;
+                        selectedRoot = auto;
+                    }
+                    var visible = !pinned && !String.IsNullOrEmpty(focus) && feed.ContainsKey(focus) ? feed[focus] : null;
+                    var orderedAgents = new List<Agent>();
+                    if (pinned || visible == null)
+                    {
+                        foreach (var key in orderedKeys)
+                        {
+                            var members = feed[key].OrderByDescending(f => f.Agent.IsRoot)
+                                .ThenBy(f => f.Agent.State == "attention" || f.Agent.State == "error" ? 0 : f.Agent.State == "working" ? 1 : f.Agent.State == "waiting" ? 2 : 3)
+                                .ThenBy(f => f.Agent.Started).ThenBy(f => f.Agent.Id, StringComparer.Ordinal);
+                            foreach (var file in members) orderedAgents.Add(file.Agent.Copy());
+                        }
+                    }
+                    else
+                    {
+                        var members = visible.OrderByDescending(f => f.Agent.IsRoot)
                             .ThenBy(f => f.Agent.State == "attention" || f.Agent.State == "error" ? 0 : f.Agent.State == "working" ? 1 : f.Agent.State == "waiting" ? 2 : 3)
                             .ThenBy(f => f.Agent.Started).ThenBy(f => f.Agent.Id, StringComparer.Ordinal);
                         foreach (var file in members) orderedAgents.Add(file.Agent.Copy());
@@ -307,9 +339,18 @@ namespace Orbit
                     else if (orderedKeys.Count <= 1) snapshot.Source = "Synced with local Codex" + FreshSuffix(lastWrite);
                     else
                     {
-                        var working = snapshot.Agents.Count(a => a.State == "working");
-                        var needsYou = snapshot.Agents.Count(a => a.State == "attention" || a.State == "error");
-                        var waiting = snapshot.Agents.Count(a => a.State == "waiting");
+                        var working = 0;
+                        var needsYou = 0;
+                        var waiting = 0;
+                        foreach (var team in feed.Values)
+                        {
+                            foreach (var file in team)
+                            {
+                                if (file.Agent.State == "working") working++;
+                                else if (file.Agent.State == "attention" || file.Agent.State == "error") needsYou++;
+                                else if (file.Agent.State == "waiting") waiting++;
+                            }
+                        }
                         var text = orderedKeys.Count + " sessions";
                         if (working > 0) text += " · " + working + " working";
                         if (needsYou > 0) text += " · " + needsYou + " needs you";
@@ -431,7 +472,7 @@ namespace Orbit
             var name = AgentName(meta, spawn, id, parent);
             var role = Json.Text(meta, "agent_role");
             if (role == "") role = Json.Text(spawn, "agent_role");
-            var agent = new Agent { Id = id, ParentId = parent, IsRoot = parent == "", Name = Json.Clean(name, 32), Role = role, Task = "Waiting for activity", State = "idle", Started = Json.Time(meta, "timestamp", file.CreationTimeUtc), Updated = file.LastWriteTimeUtc };
+            var agent = new Agent { Id = id, ParentId = parent, IsRoot = parent == "", Name = Json.Clean(name, 32), Role = role, Task = "Waiting for activity", State = "idle", Started = Json.Time(meta, "timestamp", file.CreationTimeUtc), Updated = file.LastWriteTimeUtc, SessionRoot = !String.IsNullOrEmpty(session) ? session : id };
             sessions[file.FullName] = new SessionFile { Path = file.FullName, RootId = session, DeclaredRootId = session, MetadataParentId = parent, Workspace = cwd, Agent = agent, InitialStarted = agent.Started };
         }
         private static string AgentName(Dictionary<string, object> meta, Dictionary<string, object> spawn, string id, string parent)
@@ -519,6 +560,7 @@ namespace Orbit
                     }
                     current = parent;
                 }
+                file.Agent.SessionRoot = !String.IsNullOrEmpty(file.RootId) ? file.RootId : file.Agent.Id;
             }
         }
         private List<SessionFile> SelectTeam(string root)
