@@ -78,7 +78,7 @@ namespace Orbit
                     var item = Get(key, "event", used); item.Activity = activity; item.Notify(); children.Add(item);
                 }
                 Sync(node.Items, children);
-                if (!node.Seeded) { node.IsExpanded = agent.IsRoot || hasAgents; node.Seeded = true; }
+                if (!node.Seeded) { node.IsExpanded = agent.IsRoot || hasAgents || agent.State == "working" || agent.State == "attention" || agent.State == "error" || agent.State == "waiting"; node.Seeded = true; }
                 node.Notify();
             }
             var roots = all.Where(a => parents[a.Id] == "")

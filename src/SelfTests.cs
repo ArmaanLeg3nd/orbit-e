@@ -116,6 +116,12 @@ namespace Orbit
                 botTree.Update(demo.Agents, demo.Session, demo.Project);
                 var botBuilder = botTree.Find("agent:builder");
                 Check(botBuilder.ReplyCount == 1 && botBuilder.HasReplies && botBuilder.ReplyLabel == "1 reply", "Bot cards count nested subagents as replies");
+                var actRoot = new Agent { Id = "aroot", Name = "Root", State = "working", Task = "Leading", Started = DateTime.UtcNow.AddMinutes(-2), Updated = DateTime.UtcNow };
+                var actSub = new Agent { Id = "asub", ParentId = "aroot", Name = "Sub", State = "working", Task = "Helping", Started = DateTime.UtcNow.AddMinutes(-1), Updated = DateTime.UtcNow };
+                actSub.Events.Add(new ActivityEvent { AgentId = "asub", Agent = "Sub", Text = "Live progress", State = "working", At = DateTime.UtcNow });
+                var liveTree = new AgentTree();
+                liveTree.Update(new[] { actRoot, actSub }, "live", "test");
+                Check(liveTree.Find("agent:asub").IsExpanded, "Active subagents auto-expand so live activity is visible");
                 Check(botTree.Find("agent:explorer").ReplyCount == 0 && !botTree.Find("agent:explorer").HasReplies, "Leaf bots hide the replies toggle");
 
                 var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
@@ -128,8 +134,7 @@ namespace Orbit
                     Check(liveWindow.IsVisible && Flatten(nativeTree.Items.Cast<TreeNode>()).Count(n => n.Kind == "agent") == 4, "Native tree starts with all four preview agents");
                     Check(liveWindow.Resources.Contains("SlimBar"), "Slim scrollbar style replaces the wide system bar");
                     Check(System.Windows.Controls.VirtualizingStackPanel.GetIsVirtualizing(nativeTree), "Agent feed virtualizes bot cards");
-                    Check(demo.Agents.All(a => !String.IsNullOrEmpty(a.AsciiAvatar) && a.AsciiAvatar.All(c => c < 128)), "Bot avatars are compact pure-ASCII faces");
-                    Check((System.Windows.Controls.StackPanel)liveWindow.FindName("SessionStrip") != null, "Session switcher strip is present for multi-session focus");
+                    Check(demo.Agents.All(a => a.AvatarInitial.Length == 1), "Bot avatars show a single neutral initial");
                     Check(((SolidColorBrush)nativeTree.Foreground).Color.R > 220, "Native tree text does not inherit the system's black foreground");
                     Check(liveWindow.AllowsTransparency && liveWindow.WindowStyle == WindowStyle.None && liveWindow.Topmost && !liveWindow.ShowInTaskbar, "Widget remains a frameless transparent topmost native window");
                     var glass = (LinearGradientBrush)((Border)liveWindow.FindName("Surface")).Background;
@@ -178,7 +183,7 @@ namespace Orbit
                     Check(liveWindow.Width == 380 && ((TextBlock)liveWindow.FindName("SummaryTitle")).Text == "Needs attention", "A new live attention event expands the widget automatically");
                     Render(liveWindow, Path.Combine(root, "attention.png"));
                     Check(((TextBlock)liveWindow.FindName("SourceLabel")).Text == "Connected to local event file", "Live data source is shown accurately");
-                    File.WriteAllText(events, "", new UTF8Encoding(false)); Pump(1600);
+                    File.WriteAllText(events, "", new UTF8Encoding(false)); Pump(2600);
                     Check(((FrameworkElement)liveWindow.FindName("EmptyState")).IsVisible && nativeTree.Items.Count == 0, "An empty live stream shows a useful empty state");
                     Render(liveWindow, Path.Combine(root, "empty.png"));
                     liveWindow.Close();

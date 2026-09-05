@@ -69,16 +69,24 @@ namespace Orbit
         public List<ActivityEvent> Events = new List<ActivityEvent>();
         public Brush AccentBrush { get { return Palette.State(State); } }
         public Brush SoftBrush { get { return Palette.Color("#20FFFFFF"); } }
-        public string AsciiAvatar
+        public string AvatarInitial
         {
             get
             {
-                var faces = new[] { "0_0", "o_o", "+_+", "x_x", "^_^", "=_=", "#_#", "o_O" };
-                var id = Id ?? "";
-                int hash = 0;
-                for (int i = 0; i < id.Length; i++) hash = (hash * 31 + id[i]) & 0x7fffffff;
-                return faces[hash % faces.Length];
+                if (!String.IsNullOrEmpty(Name)) return Name.Substring(0, 1).ToUpperInvariant();
+                if (!String.IsNullOrEmpty(Id)) return Id.Substring(0, 1).ToUpperInvariant();
+                return "?";
             }
+        }
+        public string ColorCode { get { return ColorFor(Id); } }
+        public Brush ColorBrush { get { return Palette.Color(ColorFor(Id)); } }
+        public static string ColorFor(string id)
+        {
+            var codes = new[] { "#7DD3FC", "#6EE7B7", "#C4B5FD", "#FDBA74", "#F9A8D4", "#5EEAD4", "#FDE68A", "#FDA4AF", "#93C5FD", "#86EFAC" };
+            id = id ?? "";
+            int hash = 0;
+            for (int i = 0; i < id.Length; i++) hash = (hash * 31 + id[i]) & 0x7fffffff;
+            return codes[hash % codes.Length];
         }
         public string Glyph { get { return State == "completed" ? "\uE73E" : State == "attention" || State == "error" ? "\uE7BA" : Role == "explorer" ? "\uE721" : Role == "reviewer" ? "\uE73E" : Role == "tester" ? "\uE9D9" : IsRoot ? "\uE8D7" : "\uE943"; } }
         public string StatusLabel { get { return State == "working" ? "Working" : State == "waiting" ? "Waiting" : State == "completed" ? "Done" : State == "attention" ? "Needs you" : State == "error" ? "Error" : "Idle"; } }
@@ -109,6 +117,7 @@ namespace Orbit
         public bool NeedsAttention;
         public DateTime LastWriteUtc = DateTime.MinValue;
         public bool IsFocused;
+        public string Color { get { return Agent.ColorFor(RootId); } }
     }
     public sealed class Snapshot
     {
@@ -208,8 +217,6 @@ namespace Orbit
         private string pinnedDirectory = "";
         private string selectedRoot = "";
         private DateTime selectedRootAt = DateTime.MinValue;
-        private string manualFocus = "";
-        public void SetFocus(string root) { manualFocus = root ?? ""; }
 
         public ActivityReader(string project, string session, string events, string sessionDirectory)
         {
@@ -284,11 +291,9 @@ namespace Orbit
                     });
                     if (!pinned && orderedKeys.Count > 0)
                     {
-                        var auto = orderedKeys[0];
-                        if (!String.IsNullOrEmpty(manualFocus) && !feed.ContainsKey(manualFocus)) manualFocus = "";
-                        focus = !String.IsNullOrEmpty(manualFocus) ? manualFocus : auto;
+                        focus = orderedKeys[0];
                         if (focus != selectedRoot) selectedRootAt = DateTime.UtcNow;
-                        selectedRoot = auto;
+                        selectedRoot = focus;
                     }
                     var visible = !pinned && !String.IsNullOrEmpty(focus) && feed.ContainsKey(focus) ? feed[focus] : null;
                     var orderedAgents = new List<Agent>();
