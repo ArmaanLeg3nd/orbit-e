@@ -256,9 +256,6 @@ namespace Orbit
             check(second.Session == "second-root" && second.FocusedSession == "second-root", "A newly created session takes focus");
             check(second.Agents.Count == 1 && second.Agents[0].Id == "second-root", "The focused team shows its own agents");
             check(second.Sessions[0].RootId == "second-root", "Session summaries order the newest active team first");
-            reader.SetFocus("first-root");
-            var refocused = reader.Poll();
-            check(refocused.FocusedSession == "first-root" && refocused.Agents[0].Id == "first-root", "Manual focus switches the visible team without losing the others");
             check(second.Source.Contains("2 sessions"), "Freshness source counts visible sessions");
             check(second.LastWriteUtc != DateTime.MinValue && !second.CatchingUp, "Freshness tracks the last local write and backlog state");
 

@@ -101,7 +101,6 @@ namespace Orbit
         private int tick;
         private int generation;
         private string detailId;
-        private string manualSession = "";
         private readonly HashSet<string> attentionSeen = new HashSet<string>();
         private Point dragStart;
         private bool dragMoved;
@@ -212,7 +211,7 @@ namespace Orbit
         }
         private void SetPreview(bool enabled)
         {
-            preview = enabled; generation++; detailId = null; manualSession = ""; attentionSeen.Clear(); agents.Clear(); tree.Clear();
+            preview = enabled; generation++; detailId = null; attentionSeen.Clear(); agents.Clear(); tree.Clear();
             SetModeLabels(); Poll();
         }
         private void Poll()
@@ -276,38 +275,9 @@ namespace Orbit
             Text("PillSubtitle", preview ? "Preview · simulated activity" : sessionCount > 1 ? sessionCount + " sessions · " + working + " working" : waiting > 0 ? waiting + " waiting · " + done + " done" : done > 0 ? done + " completed · " + snapshot.Project : "Orbit · " + snapshot.Project);
             Visible("EmptyState", agents.Count == 0);
             Text("EmptyDescription", snapshot.Problem != "" ? snapshot.Problem : "Agents will appear as they start working.");
-            RenderSessionStrip(snapshot);
             tree.Update(agents, !String.IsNullOrEmpty(snapshot.FocusedSession) ? snapshot.FocusedSession : snapshot.Session, snapshot.Project);
             if (detailId != null) RefreshDetail();
             tray.Text = Json.Clean("Orbit · " + (preview ? "Preview · " : "") + title, 63);
-        }
-        private void RenderSessionStrip(Snapshot snapshot)
-        {
-            var strip = Find<StackPanel>("SessionStrip");
-            var scroller = Find<ScrollViewer>("SessionScroller");
-            strip.Children.Clear();
-            var show = !preview && String.IsNullOrEmpty(options.Session) && snapshot.Sessions.Count > 1;
-            scroller.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-            if (!show) return;
-            if (!String.IsNullOrEmpty(manualSession) && !snapshot.Sessions.Any(s => s.RootId == manualSession)) manualSession = "";
-            foreach (var session in snapshot.Sessions)
-            {
-                var shortId = session.RootId.Substring(0, Math.Min(8, session.RootId.Length));
-                var label = (session.NeedsAttention ? "! " : "") + shortId + (session.Working > 0 ? " · " + session.Working : "");
-                var pill = new Button { Content = label, Tag = session.RootId, ToolTip = session.RootId + " · " + session.Agents + " agents", Margin = new Thickness(0, 0, 6, 0), Padding = new Thickness(8, 3, 8, 3), FontSize = 10, Cursor = Cursors.Hand };
-                pill.Click += delegate
-                {
-                    var root = (string)((Button)pill).Tag;
-                    manualSession = manualSession == root ? "" : root;
-                    reader.SetFocus(manualSession);
-                    Poll();
-                };
-                var focused = session.RootId == (!String.IsNullOrEmpty(manualSession) ? manualSession : snapshot.FocusedSession);
-                pill.Background = focused ? Palette.Color("#30FFFFFF") : Palette.Color("#0CFFFFFF");
-                pill.Foreground = session.NeedsAttention ? Palette.State("attention") : Find<TextBlock>("SourceLabel").Foreground;
-                pill.BorderThickness = new Thickness(0);
-                strip.Children.Add(pill);
-            }
         }
         private void OpenDetail(string id)
         {
