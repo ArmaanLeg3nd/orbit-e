@@ -271,10 +271,11 @@ namespace Orbit
             Text("PillTitle", title); Text("ProjectLabel", snapshot.Project);
             Text("SourceLabel", snapshot.Source);
             Find<TextBlock>("SourceLabel").ToolTip = snapshot.Problem == "" ? (preview ? "Simulated events for exploring the widget." : "Read-only local activity. No data leaves your computer.") : snapshot.Problem;
-            Text("PillSubtitle", preview ? "Preview · simulated activity" : waiting > 0 ? waiting + " waiting · " + done + " done" : done > 0 ? done + " completed · " + snapshot.Project : "Orbit · " + snapshot.Project);
+            var sessionCount = preview ? 0 : snapshot.TotalSessions;
+            Text("PillSubtitle", preview ? "Preview · simulated activity" : sessionCount > 1 ? sessionCount + " sessions · " + working + " working" : waiting > 0 ? waiting + " waiting · " + done + " done" : done > 0 ? done + " completed · " + snapshot.Project : "Orbit · " + snapshot.Project);
             Visible("EmptyState", agents.Count == 0);
             Text("EmptyDescription", snapshot.Problem != "" ? snapshot.Problem : "Agents will appear as they start working.");
-            tree.Update(agents, snapshot.Session, snapshot.Project);
+            tree.Update(agents, !String.IsNullOrEmpty(snapshot.FocusedSession) ? snapshot.FocusedSession : snapshot.Session, snapshot.Project);
             if (detailId != null) RefreshDetail();
             tray.Text = Json.Clean("Orbit · " + (preview ? "Preview · " : "") + title, 63);
         }

@@ -89,15 +89,31 @@ namespace Orbit
         public void Notify() { if (PropertyChanged != null) PropertyChanged(this, new PropertyChangedEventArgs("")); }
         public event PropertyChangedEventHandler PropertyChanged;
     }
+    public sealed class SessionSummary
+    {
+        public string RootId = "";
+        public int Agents;
+        public int Working;
+        public bool NeedsAttention;
+        public DateTime LastWriteUtc = DateTime.MinValue;
+        public bool IsFocused;
+    }
     public sealed class Snapshot
     {
         public List<Agent> Agents = new List<Agent>();
         public List<ActivityEvent> Events = new List<ActivityEvent>();
+        public List<SessionSummary> Sessions = new List<SessionSummary>();
         public string Project = "";
         public string Source = "Watching local activity";
         public string Problem = "";
         public string Session = "";
+        public string FocusedSession = "";
         public bool Connected;
+        public bool CatchingUp;
+        public string NewerRoot = "";
+        public int TotalAgents;
+        public int TotalSessions;
+        public DateTime LastWriteUtc = DateTime.MinValue;
     }
 
     // Byte offsets and incomplete-line buffering prevent partial UTF-8 writes from being lost.
@@ -105,12 +121,14 @@ namespace Orbit
     {
         public long Offset;
         public bool WasReset;
+        public bool HitBudget;
         private readonly List<byte> pending = new List<byte>();
         private bool discardLine;
         public List<string> Read(string path, int budget)
         {
             var lines = new List<string>();
             WasReset = false;
+            HitBudget = false;
             using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
             {
                 if (stream.Length < Offset) { Offset = 0; pending.Clear(); discardLine = false; WasReset = true; }
@@ -135,6 +153,7 @@ namespace Orbit
                         }
                     }
                 }
+                if (budget <= 0 && stream.Length > Offset) HitBudget = true;
             }
             return lines;
         }
@@ -142,6 +161,11 @@ namespace Orbit
 
     public sealed class ActivityReader
     {
+        private sealed class PendingTool
+        {
+            public string Name;
+            public string Label;
+        }
         private sealed class SessionFile
         {
             public string Path;
@@ -152,9 +176,12 @@ namespace Orbit
             public Agent Agent;
             public DateTime InitialStarted;
             public JsonlTail Tail = new JsonlTail();
-            public readonly Dictionary<string, string> Tools = new Dictionary<string, string>();
+            public readonly Dictionary<string, PendingTool> Tools = new Dictionary<string, PendingTool>();
             public readonly Dictionary<string, string> AttentionCalls = new Dictionary<string, string>();
             public string UnkeyedAttention = "";
+            public string LastActivity = "";
+            public readonly HashSet<string> MessageIds = new HashSet<string>();
+            public readonly Queue<string> MessageOrder = new Queue<string>();
         }
         private readonly string workspace;
         private readonly string sessionFilter;
@@ -168,6 +195,7 @@ namespace Orbit
         private DateTime pinnedLookupAt;
         private string pinnedDirectory = "";
         private string selectedRoot = "";
+        private DateTime selectedRootAt = DateTime.MinValue;
 
         public ActivityReader(string project, string session, string events, string sessionDirectory)
         {
@@ -193,32 +221,116 @@ namespace Orbit
                 else
                 {
                     if (!Directory.Exists(sessionsPath)) { snapshot.Source = "Waiting for Codex"; snapshot.Problem = "Start a local Codex session in this project to see its team here."; return snapshot; }
-                    if ((DateTime.UtcNow - discoveryAt).TotalSeconds > 5) { Discover(); discoveryAt = DateTime.UtcNow; }
-                    var root = !String.IsNullOrEmpty(sessionFilter) ? sessionFilter : selectedRoot;
-                    var team = SelectTeam(root);
-                    foreach (var file in team)
+                    var discoveryInterval = !String.IsNullOrEmpty(sessionFilter) ? 5 : String.IsNullOrEmpty(selectedRoot) ? 1.5 : 5;
+                    if ((DateTime.UtcNow - discoveryAt).TotalSeconds > discoveryInterval) { Discover(); discoveryAt = DateTime.UtcNow; }
+                    var pinned = !String.IsNullOrEmpty(sessionFilter);
+                    var focus = pinned ? sessionFilter : selectedRoot;
+                    var feed = pinned ? new Dictionary<string, List<SessionFile>>(StringComparer.Ordinal) : AllTeams();
+                    if (pinned) feed[sessionFilter] = SelectTeam(sessionFilter);
+                    var orderedKeys = new List<string>(feed.Keys);
+                    orderedKeys.Sort(delegate(string a, string b)
                     {
-                        try
+                        var rankA = TeamRank(feed[a]);
+                        var rankB = TeamRank(feed[b]);
+                        if (rankA != rankB) return rankA.CompareTo(rankB);
+                        var writeA = TeamWrite(feed[a]);
+                        var writeB = TeamWrite(feed[b]);
+                        if (writeA != writeB) return writeB.CompareTo(writeA);
+                        return String.Compare(a, b, StringComparison.Ordinal);
+                    });
+                    var catchingUp = false;
+                    var lastWrite = DateTime.MinValue;
+                    foreach (var key in orderedKeys)
+                    {
+                        foreach (var file in feed[key])
                         {
-                            var records = file.Tail.Read(file.Path, 1048576);
-                            if (file.Tail.WasReset) ResetSession(file);
-                            foreach (var line in records) ApplySession(file, Json.Parse(line));
+                            try
+                            {
+                                var records = file.Tail.Read(file.Path, 1048576);
+                                if (file.Tail.HitBudget) catchingUp = true;
+                                if (file.Tail.WasReset) ResetSession(file);
+                                foreach (var line in records) ApplySession(file, Json.Parse(line));
+                                try { var mtime = File.GetLastWriteTimeUtc(file.Path); if (mtime > lastWrite) lastWrite = mtime; }
+                                catch (IOException) { }
+                                catch (UnauthorizedAccessException) { }
+                            }
+                            catch (IOException) { snapshot.Problem = "A session file is temporarily unavailable. Retrying automatically."; }
+                            catch (UnauthorizedAccessException) { snapshot.Problem = "A session file could not be read. Check its file permissions."; }
                         }
-                        catch (IOException) { snapshot.Problem = "A session file is temporarily unavailable. Retrying automatically."; }
-                        catch (UnauthorizedAccessException) { snapshot.Problem = "A session file could not be read. Check its file permissions."; }
                     }
-                    snapshot.Agents = team.Select(f => f.Agent.Copy()).ToList();
-                    snapshot.Session = root;
+                    orderedKeys.Sort(delegate(string a, string b)
+                    {
+                        var rankA = TeamRank(feed[a]);
+                        var rankB = TeamRank(feed[b]);
+                        if (rankA != rankB) return rankA.CompareTo(rankB);
+                        var writeA = TeamWrite(feed[a]);
+                        var writeB = TeamWrite(feed[b]);
+                        if (writeA != writeB) return writeB.CompareTo(writeA);
+                        return String.Compare(a, b, StringComparison.Ordinal);
+                    });
+                    if (!pinned && orderedKeys.Count > 0) { focus = orderedKeys[0]; selectedRoot = focus; selectedRootAt = DateTime.UtcNow; }
+                    var orderedAgents = new List<Agent>();
+                    foreach (var key in orderedKeys)
+                    {
+                        var members = feed[key].OrderByDescending(f => f.Agent.IsRoot)
+                            .ThenBy(f => f.Agent.State == "attention" || f.Agent.State == "error" ? 0 : f.Agent.State == "working" ? 1 : f.Agent.State == "waiting" ? 2 : 3)
+                            .ThenBy(f => f.Agent.Started).ThenBy(f => f.Agent.Id, StringComparer.Ordinal);
+                        foreach (var file in members) orderedAgents.Add(file.Agent.Copy());
+                    }
+                    snapshot.Agents = orderedAgents;
+                    snapshot.Session = focus;
+                    snapshot.FocusedSession = focus;
                     snapshot.Connected = snapshot.Agents.Count > 0;
-                    snapshot.Source = snapshot.Connected ? "Synced with local Codex" : "Listening for Codex";
-                    if (!snapshot.Connected) snapshot.Problem = "Start a local Codex session in this project. Its agents will appear here automatically.";
+                    snapshot.CatchingUp = catchingUp;
+                    snapshot.LastWriteUtc = lastWrite;
+                    snapshot.NewerRoot = "";
+                    snapshot.TotalAgents = snapshot.Agents.Count;
+                    snapshot.TotalSessions = orderedKeys.Count;
+                    snapshot.Sessions.Clear();
+                    foreach (var key in orderedKeys)
+                    {
+                        var summary = new SessionSummary { RootId = key, IsFocused = key == focus, LastWriteUtc = TeamWrite(feed[key]) };
+                        foreach (var file in feed[key])
+                        {
+                            summary.Agents++;
+                            if (file.Agent.State == "working") summary.Working++;
+                            if (file.Agent.State == "attention" || file.Agent.State == "error") summary.NeedsAttention = true;
+                        }
+                        snapshot.Sessions.Add(summary);
+                    }
+                    if (!snapshot.Connected) { snapshot.Source = "Listening for Codex"; snapshot.Problem = "Start a local Codex session in this project. Its agents will appear here automatically."; }
+                    else if (catchingUp) snapshot.Source = "Catching up local Codex…";
+                    else if (pinned)
+                    {
+                        snapshot.Source = "Session " + focus.Substring(0, Math.Min(8, focus.Length)) + " · " + FreshAge(lastWrite);
+                    }
+                    else if (orderedKeys.Count <= 1) snapshot.Source = "Synced with local Codex" + FreshSuffix(lastWrite);
+                    else
+                    {
+                        var working = snapshot.Agents.Count(a => a.State == "working");
+                        var needsYou = snapshot.Agents.Count(a => a.State == "attention" || a.State == "error");
+                        var waiting = snapshot.Agents.Count(a => a.State == "waiting");
+                        var text = orderedKeys.Count + " sessions";
+                        if (working > 0) text += " · " + working + " working";
+                        if (needsYou > 0) text += " · " + needsYou + " needs you";
+                        else if (waiting > 0) text += " · " + waiting + " waiting";
+                        snapshot.Source = text + FreshSuffix(lastWrite);
+                    }
                 }
                 foreach (var agent in snapshot.Agents)
                 {
                     // A silent log is not proof of completion. Keep that distinction visible.
                     if (agent.State == "working" && (DateTime.UtcNow - agent.Updated).TotalMinutes > 5) { agent.State = "idle"; agent.Task = "No recent activity · last seen " + agent.Updated.ToLocalTime().ToString("HH:mm"); agent.Ended = agent.Updated; }
                 }
-                snapshot.Agents = snapshot.Agents.OrderByDescending(a => a.IsRoot).ThenBy(a => a.State == "attention" || a.State == "error" ? 0 : a.State == "working" ? 1 : a.State == "waiting" ? 2 : 3).ThenBy(a => a.Started).Take(60).ToList();
+                if (!String.IsNullOrEmpty(eventFile)) snapshot.Agents = snapshot.Agents.OrderByDescending(a => a.IsRoot).ThenBy(a => a.State == "attention" || a.State == "error" ? 0 : a.State == "working" ? 1 : a.State == "waiting" ? 2 : 3).ThenBy(a => a.Started).ThenBy(a => a.Id, StringComparer.Ordinal).ToList();
+                if (String.IsNullOrEmpty(eventFile)) snapshot.TotalAgents = snapshot.Agents.Count;
+                snapshot.Agents = snapshot.Agents.Take(60).ToList();
+                if (snapshot.TotalAgents > snapshot.Agents.Count && snapshot.Problem == "")
+                {
+                    snapshot.Problem = snapshot.TotalSessions > 1
+                        ? "Showing " + snapshot.Agents.Count + " of " + snapshot.TotalAgents + " agents across " + snapshot.TotalSessions + " sessions; oldest completed hidden first."
+                        : "Showing " + snapshot.Agents.Count + " of " + snapshot.TotalAgents + " agents; oldest completed entries hidden first.";
+                }
                 snapshot.Events = snapshot.Agents.SelectMany(a => a.Events).OrderByDescending(e => e.At).Take(100).ToList();
             }
             catch (IOException) { snapshot.Source = "Reconnecting to local activity"; snapshot.Problem = "Activity is temporarily unavailable. Orbit will retry automatically."; }
@@ -239,21 +351,59 @@ namespace Orbit
             foreach (var file in candidates.OrderByDescending(f => f.LastWriteTimeUtc).Take(160)) DiscoverFile(file);
             DiscoverPinned();
             ResolveAncestry();
-            // Follow the latest root in this workspace; --session pins a particular tree.
-            var latest = sessions.Values.Where(s => s.Agent.IsRoot).OrderByDescending(s => File.GetLastWriteTimeUtc(s.Path)).FirstOrDefault();
-            if (latest != null) selectedRoot = latest.Agent.Id;
-            else
+            // Follow the newest active session; show every team so nothing hides.
+            // --session still pins a single tree.
+            if (String.IsNullOrEmpty(sessionFilter))
             {
-                // An orphan tree is still useful when its parent's rollout has not arrived.
-                latest = sessions.Values.OrderByDescending(s => File.GetLastWriteTimeUtc(s.Path)).FirstOrDefault();
-                if (latest != null) selectedRoot = latest.RootId;
+                var focus = PickFocus();
+                if (!String.IsNullOrEmpty(focus) && focus != selectedRoot) selectedRootAt = DateTime.UtcNow;
+                selectedRoot = focus;
             }
             if (sessions.Count > 200)
             {
-                var protectedPaths = new HashSet<string>(SelectTeam(String.IsNullOrEmpty(sessionFilter) ? selectedRoot : sessionFilter).Select(s => s.Path), StringComparer.OrdinalIgnoreCase);
+                var protectedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (!String.IsNullOrEmpty(sessionFilter)) foreach (var member in SelectTeam(sessionFilter)) protectedPaths.Add(member.Path);
+                else
+                {
+                    foreach (var team in AllTeams().Values)
+                    {
+                        if (TeamActive(team)) foreach (var member in team) protectedPaths.Add(member.Path);
+                    }
+                    if (!String.IsNullOrEmpty(selectedRoot)) foreach (var member in SelectTeam(selectedRoot)) protectedPaths.Add(member.Path);
+                }
                 foreach (var key in sessions.Where(s => !protectedPaths.Contains(s.Key)).OrderBy(s => s.Value.Agent.Updated).Select(s => s.Key).Take(sessions.Count - 160).ToList()) sessions.Remove(key);
             }
             if (skipped.Count > 2000) skipped.Clear();
+        }
+        private bool WorkspaceMatches(string cwd)
+        {
+            var normCwd = (cwd ?? "").TrimEnd('\\', '/');
+            var normWs = workspace.TrimEnd('\\', '/');
+            if (String.Equals(normCwd, normWs, StringComparison.OrdinalIgnoreCase)) return true;
+            if (normCwd.Length > normWs.Length && normCwd.StartsWith(normWs, StringComparison.OrdinalIgnoreCase))
+            {
+                var sep = normCwd[normWs.Length];
+                return sep == '\\' || sep == '/';
+            }
+            return false;
+        }
+        private static string FreshAge(DateTime lastWrite)
+        {
+            if (lastWrite == DateTime.MinValue) return "Synced with local Codex";
+            var age = DateTime.UtcNow - lastWrite;
+            if (age.TotalSeconds < 10) return "Synced";
+            if (age.TotalMinutes < 1) return "Synced " + Math.Max(1, (int)age.TotalSeconds) + "s ago";
+            if (age.TotalHours < 1) return "Synced " + Math.Max(1, (int)age.TotalMinutes) + "m ago";
+            return "last write " + lastWrite.ToLocalTime().ToString("HH:mm");
+        }
+        private static string FreshSuffix(DateTime lastWrite)
+        {
+            if (lastWrite == DateTime.MinValue) return "";
+            var age = DateTime.UtcNow - lastWrite;
+            if (age.TotalSeconds < 10) return "";
+            if (age.TotalMinutes < 1) return " · " + Math.Max(1, (int)age.TotalSeconds) + "s ago";
+            if (age.TotalHours < 1) return " · " + Math.Max(1, (int)age.TotalMinutes) + "m ago";
+            return " · last write " + lastWrite.ToLocalTime().ToString("HH:mm");
         }
         private void DiscoverFile(FileInfo file)
         {
@@ -268,7 +418,7 @@ namespace Orbit
             catch (UnauthorizedAccessException) { return; }
             if (meta == null || String.IsNullOrEmpty(Json.Text(meta, "id"))) return;
             var cwd = Json.Text(meta, "cwd");
-            if (!String.Equals(cwd.TrimEnd('\\', '/'), workspace.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase)) { skipped.Add(file.FullName); return; }
+            if (!WorkspaceMatches(cwd)) { skipped.Add(file.FullName); return; }
             var source = Json.Map(meta, "source");
             var subagent = Json.Map(source, "subagent");
             // Internal guardian/review tasks are not user-spawned agents.
@@ -388,13 +538,75 @@ namespace Orbit
                 return false;
             }).ToList();
         }
+        private Dictionary<string, List<SessionFile>> AllTeams()
+        {
+            var byId = SessionsById();
+            var teams = new Dictionary<string, List<SessionFile>>(StringComparer.Ordinal);
+            foreach (var file in byId.Values)
+            {
+                var key = !String.IsNullOrEmpty(file.RootId) ? file.RootId : file.Agent.Id;
+                List<SessionFile> team;
+                if (!teams.TryGetValue(key, out team)) { team = new List<SessionFile>(); teams[key] = team; }
+                team.Add(file);
+            }
+            return teams;
+        }
+        private static bool TeamActive(List<SessionFile> team)
+        {
+            foreach (var file in team)
+            {
+                if (file.Agent.State == "working" || file.Agent.State == "waiting" || file.Agent.State == "attention" || file.Agent.State == "error") return true;
+            }
+            return false;
+        }
+        private static DateTime TeamWrite(List<SessionFile> team)
+        {
+            var latest = DateTime.MinValue;
+            foreach (var file in team)
+            {
+                try { var mtime = File.GetLastWriteTimeUtc(file.Path); if (mtime > latest) latest = mtime; }
+                catch (IOException) { if (file.Agent.Updated > latest) latest = file.Agent.Updated; }
+                catch (UnauthorizedAccessException) { if (file.Agent.Updated > latest) latest = file.Agent.Updated; }
+            }
+            return latest;
+        }
+        private static int TeamRank(List<SessionFile> team)
+        {
+            var needsAttention = false;
+            var working = false;
+            var waiting = false;
+            foreach (var file in team)
+            {
+                if (file.Agent.State == "attention" || file.Agent.State == "error") needsAttention = true;
+                else if (file.Agent.State == "working") working = true;
+                else if (file.Agent.State == "waiting") waiting = true;
+            }
+            return needsAttention ? 0 : working ? 1 : waiting ? 2 : 3;
+        }
+        private string PickFocus()
+        {
+            var teams = AllTeams();
+            if (teams.Count == 0) return "";
+            var active = new List<KeyValuePair<string, List<SessionFile>>>();
+            foreach (var entry in teams) if (TeamActive(entry.Value)) active.Add(entry);
+            var pool = active.Count > 0 ? active : new List<KeyValuePair<string, List<SessionFile>>>(teams);
+            var best = pool[0];
+            var bestWrite = TeamWrite(best.Value);
+            for (int i = 1; i < pool.Count; i++)
+            {
+                var write = TeamWrite(pool[i].Value);
+                if (write > bestWrite || (write == bestWrite && String.Compare(pool[i].Key, best.Key, StringComparison.Ordinal) < 0)) { best = pool[i]; bestWrite = write; }
+            }
+            return best.Key;
+        }
         private static void ClearPending(SessionFile file)
         {
-            file.Tools.Clear(); file.AttentionCalls.Clear(); file.UnkeyedAttention = "";
+            file.Tools.Clear(); file.AttentionCalls.Clear(); file.UnkeyedAttention = ""; file.LastActivity = "";
         }
         private static void ResetSession(SessionFile file)
         {
             ClearPending(file);
+            file.MessageIds.Clear(); file.MessageOrder.Clear();
             file.Agent.Events.Clear(); file.Agent.State = "idle"; file.Agent.Task = "Waiting for activity";
             file.Agent.Started = file.InitialStarted; file.Agent.Ended = DateTime.MinValue; file.Agent.Updated = file.InitialStarted;
         }
@@ -409,18 +621,24 @@ namespace Orbit
             if (!String.IsNullOrEmpty(attention)) { state = "attention"; task = attention; }
             else if (file.Tools.Count > 0)
             {
-                var running = file.Tools.Values.FirstOrDefault(name => !name.Contains("wait"));
+                var running = file.Tools.Values.FirstOrDefault(tool => !tool.Name.Contains("wait"));
                 state = running == null ? "waiting" : "working";
-                task = running == null ? "Waiting for a task" : ToolLabel(running);
+                task = running == null ? "Waiting for a task" : running.Label;
             }
             file.Agent.State = state; file.Agent.Task = task; file.Agent.Ended = DateTime.MinValue;
         }
-        private static void Record(Agent agent, string text, DateTime at)
+        private static void Record(Agent agent, string text, DateTime at, string state = null)
         {
             text = Json.Clean(text, 240);
             if (text == "") return;
-            if (agent.Events.Count > 0 && agent.Events[agent.Events.Count - 1].Text == text) return;
-            agent.Events.Add(new ActivityEvent { AgentId = agent.Id, Agent = agent.Name, Text = text, State = agent.State, At = at });
+            var activity = new ActivityEvent { AgentId = agent.Id, Agent = agent.Name, Text = text, State = state ?? agent.State, At = at };
+            if (agent.Events.Count > 0 && agent.Events[agent.Events.Count - 1].Text == text)
+            {
+                // Snapshots share event objects: replace, never mutate an event on the reader thread.
+                if (at >= agent.Events[agent.Events.Count - 1].At) agent.Events[agent.Events.Count - 1] = activity;
+                return;
+            }
+            agent.Events.Add(activity);
             if (agent.Events.Count > 40) agent.Events.RemoveAt(0);
         }
         private static string ToolLabel(string name)
@@ -435,6 +653,120 @@ namespace Orbit
             if (name.Contains("test")) return "Running checks";
             if (name.Contains("message")) return "Coordinating with the team";
             return "Using " + Json.Clean(name.Replace('_', ' '), 46);
+        }
+        private static string PublicText(Dictionary<string, object> item)
+        {
+            var content = Json.Get(item, "content");
+            if (content is string) return (string)content;
+            var parts = content as object[];
+            if (parts == null) return "";
+            return String.Join(" ", parts.OfType<Dictionary<string, object>>()
+                .Where(part => new[] { "Text", "text", "output_text" }.Contains(Json.Text(part, "type")))
+                .Select(part => Json.Text(part, "text")));
+        }
+        private static void PublicActivity(SessionFile file, string message, DateTime at)
+        {
+            message = Json.Clean(message, 240);
+            if (message == "") return;
+            file.LastActivity = Json.Clean(message, 180);
+            if (file.Agent.Ended == DateTime.MinValue && file.Agent.State != "attention" && file.Agent.State != "waiting") file.Agent.Task = file.LastActivity;
+            Record(file.Agent, message, at);
+        }
+        private static void AssistantMessage(SessionFile file, Dictionary<string, object> item, DateTime at, bool publicByDefault)
+        {
+            var phase = Json.Text(item, "phase");
+            var channel = Json.Text(item, "channel");
+            if (phase == "analysis" || channel == "analysis") return;
+            var final = phase == "final_answer" || channel == "final";
+            if (!final && !(phase == "commentary" || channel == "commentary" || (publicByDefault && phase == "" && channel == ""))) return;
+            var message = final ? "" : PublicText(item);
+            if (!final && String.IsNullOrWhiteSpace(message)) return;
+            var id = Json.Text(item, "id");
+            if (id != "")
+            {
+                if (!file.MessageIds.Add(id)) return;
+                file.MessageOrder.Enqueue(id);
+                if (file.MessageOrder.Count > 256) file.MessageIds.Remove(file.MessageOrder.Dequeue());
+            }
+            if (final)
+            {
+                ClearPending(file); file.Agent.State = "completed"; file.Agent.Ended = at; file.Agent.Task = "Work complete";
+                Record(file.Agent, file.Agent.Task, at);
+            }
+            else PublicActivity(file, message, at);
+        }
+        private static string CommandActivity(object value)
+        {
+            var args = value as object[];
+            var command = value as string ?? (args == null ? "" : String.Join(" ", args.OfType<string>()));
+            if (args != null)
+                for (int i = 0; i + 1 < args.Length; i++)
+                    if (new[] { "-command", "-c", "/c" }.Contains(Convert.ToString(args[i], CultureInfo.InvariantCulture).ToLowerInvariant())) { command = args[i + 1] as string ?? ""; break; }
+            if (command.Length > 32768) command = command.Substring(0, 32768);
+            // Classify locally, but never put raw arguments, paths, or output in the UI.
+            var start = @"(?i)(?:^|[;&|\r\n])\s*(?:&\s+)?['""]?(?:[\w .:\\/-]*[\\/])?";
+            if (Regex.IsMatch(command, start + @"(?:(?:pytest|jest|vitest)\b|python(?:3|\.exe)?\s+-m\s+pytest\b|(?:dotnet|cargo|npm|pnpm|yarn|bun)\s+(?:run\s+)?test\b|build\.ps1\b[^\r\n]*\s-test\b)")) return "checks";
+            if (Regex.IsMatch(command, start + @"(?:build\.ps1\b|(?:dotnet|cargo|npm|pnpm|yarn|bun)\s+(?:run\s+)?build\b)")) return "build";
+            if (Regex.IsMatch(command, start + @"git\s+(status|diff|log|show)\b")) return "changes";
+            if (Regex.IsMatch(command, start + @"(rg|grep|select-string)\b")) return "search";
+            if (Regex.IsMatch(command, start + @"(get-content|read_mcp_resource)\b")) return "read";
+            return "command";
+        }
+        private static string CommandLabel(string activity, bool finished)
+        {
+            switch (activity)
+            {
+                case "checks": return finished ? "Checks finished" : "Running checks";
+                case "build": return finished ? "Build finished" : "Building the project";
+                case "changes": return finished ? "Inspected project changes" : "Inspecting project changes";
+                case "search": return finished ? "Project search finished" : "Searching project files";
+                case "read": return finished ? "Read project context" : "Reading project context";
+                default: return finished ? "Command finished" : "Running a command";
+            }
+        }
+        private static string CallLabel(string name, Dictionary<string, object> payload)
+        {
+            if (name.EndsWith("exec_command", StringComparison.Ordinal))
+            {
+                var arguments = Json.Map(payload, "arguments") ?? Json.Parse(Json.Text(payload, "arguments"));
+                return CommandLabel(CommandActivity(Json.Get(arguments, "cmd")), false);
+            }
+            if (name.Split('.').Last() == "exec")
+            {
+                // Only recognize explicit nested tool names; never evaluate wrapper JavaScript.
+                var names = Regex.Matches(Json.Text(payload, "input"), @"\btools\.([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+                    .Cast<Match>().Select(match => match.Groups[1].Value).Distinct().ToList();
+                if (names.Count == 1) return ToolLabel(names[0]);
+                if (names.Count > 1) return "Running " + names.Count + " tool calls";
+            }
+            return ToolLabel(name);
+        }
+        private static void ItemActivity(SessionFile file, Dictionary<string, object> item, bool finished, DateTime at)
+        {
+            var type = Json.Text(item, "type");
+            if (type == "AgentMessage") { if (finished) AssistantMessage(file, item, at, true); return; }
+            var status = Json.Text(item, "status");
+            var failed = status == "failed" || status == "declined";
+            string label;
+            if (type == "CommandExecution")
+            {
+                int code;
+                var hasCode = Int32.TryParse(Convert.ToString(Json.Get(item, "exit_code"), CultureInfo.InvariantCulture), out code);
+                failed |= hasCode && code != 0;
+                var activity = CommandActivity(Json.Get(item, "command"));
+                label = failed ? (activity == "checks" ? "Checks failed" : activity == "build" ? "Build failed" : "Command failed") + (hasCode ? " (exit " + code + ")" : "") : CommandLabel(activity, finished);
+            }
+            else if (type == "FileChange")
+            {
+                var changes = Json.Map(item, "changes");
+                var count = changes == null ? 0 : changes.Count;
+                var files = count == 0 ? "project files" : count + " project file" + (count == 1 ? "" : "s");
+                label = failed ? "File update failed" : (finished && status == "completed" ? "Updated " : "Updating ") + files;
+            }
+            else return; // No reasoning, prompts, command output, diffs, or unknown item contents.
+            if (finished) file.LastActivity = label;
+            if (file.Agent.Ended == DateTime.MinValue && file.Agent.State != "attention" && file.Agent.State != "waiting") file.Agent.Task = label;
+            Record(file.Agent, label, at, failed ? "error" : "working");
         }
         private void ApplySession(SessionFile file, Dictionary<string, object> row)
         {
@@ -466,14 +798,10 @@ namespace Orbit
                 }
                 else if (kind == "agent_message")
                 {
-                    var message = Json.Text(payload, "message");
-                    if (message != "")
-                    {
-                        if (agent.State != "attention") agent.Task = Json.Clean(message, 180);
-                        Record(agent, message, at);
-                    }
+                    PublicActivity(file, Json.Text(payload, "message"), at);
                 }
-                // Deliberately do not display reasoning, prompts, tool arguments, or tool output.
+                else if (kind == "item_completed" || kind == "item_started" || kind == "item_updated") ItemActivity(file, Json.Map(payload, "item"), kind == "item_completed", at);
+                // Activity is derived only from public text and allowlisted action metadata.
                 if (kind != "token_count" && kind != "thread_settings_applied") agent.Updated = at;
             }
             else if (type == "response_item")
@@ -482,7 +810,8 @@ namespace Orbit
                 {
                     var name = Json.Text(payload, "name");
                     var callId = Json.Text(payload, "call_id");
-                    if (callId != "") file.Tools[callId] = name;
+                    var label = CallLabel(name, payload);
+                    if (callId != "") file.Tools[callId] = new PendingTool { Name = name, Label = label };
                     if (name.Contains("request_user_input") || name.Contains("request_approval"))
                     {
                         var attention = name.Contains("request_user_input") ? "Waiting for your input in Codex" : "Approval requested in Codex";
@@ -491,7 +820,8 @@ namespace Orbit
                     // Bound ordinary calls without dropping unanswered input/approval requests.
                     if (file.Tools.Count > 512)
                         foreach (var key in file.Tools.Keys.Where(key => !file.AttentionCalls.ContainsKey(key)).Take(file.Tools.Count - 512).ToList()) file.Tools.Remove(key);
-                    PendingState(file, name.Contains("wait") ? "waiting" : "working", ToolLabel(name));
+                    file.LastActivity = "";
+                    PendingState(file, name.Contains("wait") ? "waiting" : "working", label);
                     agent.Updated = at; Record(agent, agent.Task, at);
                 }
                 else if (kind == "function_call_output" || kind == "custom_tool_call_output")
@@ -500,12 +830,11 @@ namespace Orbit
                     var callId = Json.Text(payload, "call_id");
                     if (callId != "") { file.Tools.Remove(callId); file.AttentionCalls.Remove(callId); }
                     agent.Updated = at;
-                    if (agent.Ended == DateTime.MinValue) PendingState(file, "working", "Reviewing results");
+                    if (agent.Ended == DateTime.MinValue) PendingState(file, "working", file.LastActivity != "" ? file.LastActivity : "Reviewing results");
                 }
                 else if (kind == "message" && Json.Text(payload, "role") == "assistant")
                 {
-                    var phase = Json.Text(payload, "phase");
-                    if (phase == "final_answer" || Json.Text(payload, "channel") == "final") { ClearPending(file); agent.State = "completed"; agent.Ended = at; agent.Task = "Work complete"; Record(agent, agent.Task, at); }
+                    AssistantMessage(file, payload, at, false);
                     agent.Updated = at;
                 }
             }
