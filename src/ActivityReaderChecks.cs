@@ -71,6 +71,10 @@ namespace Orbit
             Session(folder, "12345678-rest", "root", "", root, null);
             var names = new ActivityReader(root, "root", "", folder).Poll().Agents.ToDictionary(a => a.Id, a => a.Name);
             check(names["explicit"] == "Audit session reader", "An explicit task name takes precedence over the agent path and nickname");
+            var loneRootFolder = Path.Combine(root, "names-root-path");
+            Session(loneRootFolder, "with-root-path", "", "", root, new Dictionary<string, object> { { "agent_path", "/root" } });
+            var rootPathName = new ActivityReader(root, "", "", loneRootFolder).Poll().Agents.Single(a => a.Id == "with-root-path").Name;
+            check(rootPathName == "root", "An assigned root path names the lead root");
             check(names["path"] == "nested_checks", "Nested spawn metadata supplies the assigned agent path name");
             check(names["nickname"] == "Zeno" && names["12345678-rest"] == "Agent 12345678", "Names fall back to recorded nicknames and then a stable ID");
             var loneFolder = Path.Combine(root, "names-lone-root");

@@ -469,7 +469,7 @@ namespace Orbit
             if (name == "" && path != "")
             {
                 var parts = path.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length > 0 && !(parts.Length == 1 && parts[0] == "root")) name = parts[parts.Length - 1];
+                if (parts.Length > 0) name = parts[parts.Length - 1];
             }
             if (name == "") name = Json.Text(meta, "agent_nickname");
             if (name == "") name = Json.Text(spawn, "agent_nickname");
