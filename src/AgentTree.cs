@@ -18,13 +18,16 @@ namespace Orbit
         public ObservableCollection<TreeNode> Children { get { return Items; } }
         private bool expanded;
         public bool IsExpanded { get { return expanded; } set { if (expanded == value) return; expanded = value; Notify(); } }
-        public string Title { get { return Kind == "agent" ? Agent.Name : Kind == "event" ? Activity.Text : Caption; } }
+        public string Title { get { return Kind == "agent" ? Agent.DisplayName : Kind == "event" ? Activity.Text : Caption; } }
         public string Subtitle { get { return Kind == "agent" ? Agent.Task : ""; } }
         public string Status { get { return Kind == "agent" ? Agent.StatusLabel : ""; } }
         public System.Windows.Media.Brush StatusBrush { get { return Kind == "agent" ? Agent.AccentBrush : Palette.State("idle"); } }
         public string Elapsed { get { return Kind == "agent" ? Agent.Elapsed : Kind == "event" ? Activity.At.ToLocalTime().ToString("HH:mm:ss") : ""; } }
         public string AccessibleName { get { return Kind == "agent" ? Agent.AccessibleName : Title; } }
-        public string Hint { get { return Kind == "agent" ? Agent.Name + "\n" + Agent.Task + "\n" + Agent.Id : Kind == "event" ? Activity.Text : Title; } }
+        public int ReplyCount { get { return Children.Count(c => c.Kind == "agent"); } }
+        public bool HasReplies { get { return ReplyCount > 0; } }
+        public string ReplyLabel { get { return ReplyCount == 1 ? "1 reply" : ReplyCount + " replies"; } }
+        public string Hint { get { return Kind == "agent" ? Agent.Name + "\n" + Agent.Task + "\nLast update " + (Agent.Updated == DateTime.MinValue ? "unknown" : Agent.Updated.ToLocalTime().ToString("HH:mm:ss")) + " · " + Agent.Id : Kind == "event" ? Activity.Text : Title; } }
         public event PropertyChangedEventHandler PropertyChanged;
         public void Notify() { if (PropertyChanged != null) PropertyChanged(this, new PropertyChangedEventArgs("")); }
     }
@@ -75,11 +78,15 @@ namespace Orbit
                     var item = Get(key, "event", used); item.Activity = activity; item.Notify(); children.Add(item);
                 }
                 Sync(node.Items, children);
-                if (!node.Seeded) { node.IsExpanded = agent.IsRoot || hasAgents; node.Seeded = true; }
+                if (!node.Seeded) { node.IsExpanded = agent.IsRoot || hasAgents || agent.State == "working" || agent.State == "attention" || agent.State == "error" || agent.State == "waiting"; node.Seeded = true; }
                 node.Notify();
             }
-            var roots = all.Where(a => parents[a.Id] == "").OrderByDescending(a => a.IsRoot).Select(a => nodes["agent:" + a.Id]).ToList();
-            if (roots.Count > 0 && !(roots.Count == 1 && roots[0].Agent.IsRoot))
+            var roots = all.Where(a => parents[a.Id] == "")
+                .OrderBy(a => a.State == "attention" || a.State == "error" ? 0 : a.State == "working" ? 1 : a.State == "waiting" ? 2 : 3)
+                .ThenByDescending(a => a.Started).ThenBy(a => a.Id, StringComparer.Ordinal)
+                .Select(a => nodes["agent:" + a.Id]).ToList();
+            var allRootsAreLeads = roots.Count > 0 && roots.All(n => n.Agent.IsRoot);
+            if (!allRootsAreLeads && roots.Count > 0 && !(roots.Count == 1 && roots[0].Agent.IsRoot))
             {
                 var sessionNode = Get("session:" + session + ":" + project, "session", used);
                 sessionNode.Caption = "Session";

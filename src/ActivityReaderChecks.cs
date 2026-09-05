@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Web.Script.Serialization;
 
 namespace Orbit
@@ -18,7 +19,10 @@ namespace Orbit
             CheckAncestry(check, root);
             CheckNames(check, root);
             CheckPendingCalls(check, root);
+            CheckPublicActivity(check, root);
+            CheckActionActivity(check, root);
             CheckHistoricalPin(check, root);
+            CheckFreshSelection(check, root);
         }
 
         private static void CheckAncestry(Action<bool, string> check, string root)
@@ -67,8 +71,17 @@ namespace Orbit
             Session(folder, "12345678-rest", "root", "", root, null);
             var names = new ActivityReader(root, "root", "", folder).Poll().Agents.ToDictionary(a => a.Id, a => a.Name);
             check(names["explicit"] == "Audit session reader", "An explicit task name takes precedence over the agent path and nickname");
+            var loneRootFolder = Path.Combine(root, "names-root-path");
+            Session(loneRootFolder, "with-root-path", "", "", root, new Dictionary<string, object> { { "agent_path", "/root" } });
+            var rootPathName = new ActivityReader(root, "", "", loneRootFolder).Poll().Agents.Single(a => a.Id == "with-root-path").Name;
+            check(rootPathName == "root", "An assigned root path names the lead root");
             check(names["path"] == "nested_checks", "Nested spawn metadata supplies the assigned agent path name");
             check(names["nickname"] == "Zeno" && names["12345678-rest"] == "Agent 12345678", "Names fall back to recorded nicknames and then a stable ID");
+            var loneFolder = Path.Combine(root, "names-lone-root");
+            Session(loneFolder, "lone", "", "", root, null);
+            var lone = new ActivityReader(root, "", "", loneFolder).Poll().Agents.Single(a => a.Id == "lone");
+            DateTime loneAt;
+            check(lone.Name.StartsWith("Session ") && DateTime.TryParse(lone.Name.Substring(8), out loneAt) && (DateTime.Now - loneAt).TotalMinutes < 5, "A nameless lead shows its session start time instead of a Coordinator ID");
         }
 
         private static void CheckPendingCalls(Action<bool, string> check, string root)
@@ -121,6 +134,108 @@ namespace Orbit
             check(reset.State == "working" && reset.Events.Count == 1, "Truncated session logs clear stale requests and prior event history before replay");
         }
 
+        private static void CheckPublicActivity(Action<bool, string> check, string root)
+        {
+            var folder = Path.Combine(root, "public-activity");
+            var path = Session(folder, "root", "", "root", root, null);
+            var reader = new ActivityReader(root, "root", "", folder);
+            reader.Poll();
+            var at = DateTime.UtcNow;
+            var message = new { type = "AgentMessage", id = "progress-1", phase = "commentary", content = new[] { new { type = "Text", text = "Verifying the activity parser." } } };
+            Item(path, message, at);
+            var first = reader.Poll().Agents.Single();
+            check(first.Task == "Verifying the activity parser." && first.Events.Last().At == at, "Completed public AgentMessage items update main-agent activity");
+            Append(path, new { timestamp = at.AddSeconds(1).ToString("o"), type = "response_item", payload = new { type = "message", id = "progress-1", role = "assistant", phase = "commentary", content = new[] { new { type = "output_text", text = "Verifying the activity parser." } } } });
+            var mirrored = reader.Poll().Agents.Single();
+            check(mirrored.Events.Count == first.Events.Count && mirrored.Events.Last().At == at, "Mirrored public messages with the same ID are not replayed");
+            Append(path, new { timestamp = at.AddSeconds(2).ToString("o"), type = "response_item", payload = new { type = "message", id = "progress-2", role = "assistant", phase = "commentary", content = new[] { new { type = "output_text", text = "Verifying the activity parser." } } } });
+            var repeated = reader.Poll().Agents.Single();
+            check(repeated.Events.Count == first.Events.Count && repeated.Events.Last().At == at.AddSeconds(2), "Repeated activity refreshes its timestamp without adding a redundant row");
+            check(first.Events.Last().At == at && !Object.ReferenceEquals(first.Events.Last(), repeated.Events.Last()), "Refreshing a repeated event leaves prior UI snapshots immutable");
+            Event(path, new { type = "item_completed", item = new { type = "Reasoning", summary_text = "private reasoning", raw_content = "private reasoning" } });
+            Append(path, new { timestamp = DateTime.UtcNow.ToString("o"), type = "response_item", payload = new { type = "message", role = "assistant", channel = "analysis", content = new[] { new { type = "output_text", text = "private reasoning" } } } });
+            Append(path, new { timestamp = DateTime.UtcNow.ToString("o"), type = "response_item", payload = new { type = "message", role = "user", phase = "commentary", content = new[] { new { type = "output_text", text = "private user prompt" } } } });
+            Item(path, new { type = "UserMessage", content = "private user prompt" }, DateTime.UtcNow);
+            check(reader.Poll().Agents.Single().Events.Count == repeated.Events.Count, "Reasoning, analysis-channel text, and user prompts never enter activity");
+            Append(path, new { timestamp = at.AddSeconds(3).ToString("o"), type = "response_item", payload = new { type = "message", role = "assistant", channel = "commentary", content = new object[] { new { type = "output_text", text = "Reviewing" }, new { type = "reasoning_text", text = "private reasoning" }, new { type = "text", text = "the README." } } } });
+            check(reader.Poll().Agents.Single().Task == "Reviewing the README.", "Commentary content joins only public text parts");
+            Item(path, new { type = "AgentMessage", id = "empty-first", phase = "commentary", content = "" }, at.AddSeconds(4));
+            Item(path, new { type = "AgentMessage", id = "empty-first", phase = "commentary", content = "Progress after an empty representation." }, at.AddSeconds(5));
+            check(reader.Poll().Agents.Single().Task == "Progress after an empty representation.", "Empty message representations do not suppress later public content with the same ID");
+            Item(path, new { type = "AgentMessage", phase = "commentary", channel = "analysis", content = "private reasoning" }, at.AddSeconds(6));
+            check(reader.Poll().Agents.Single().Task == "Progress after an empty representation.", "An explicit analysis channel is excluded even with conflicting phase metadata");
+            Call(path, "input", "functions.request_user_input");
+            Item(path, new { type = "AgentMessage", phase = "commentary", content = "An update while awaiting your choice." }, DateTime.UtcNow);
+            var attention = reader.Poll().Agents.Single();
+            check(attention.State == "attention" && attention.Task == "Waiting for your input in Codex" && attention.Events.Last().Text.Contains("An update"), "Public progress is recorded without hiding a pending input request");
+            Result(path, "input");
+            Call(path, "wait", "collaboration.wait_agent");
+            Event(path, new { type = "agent_message", message = "The team is reviewing." });
+            var waiting = reader.Poll().Agents.Single();
+            check(waiting.State == "waiting" && waiting.Task == "Waiting for a task" && waiting.Events.Last().Text == "The team is reviewing.", "Legacy public messages preserve an outstanding wait");
+            Result(path, "wait");
+            Item(path, new { type = "AgentMessage", phase = "final_answer", content = "Finished." }, DateTime.UtcNow);
+            check(reader.Poll().Agents.Single().State == "completed", "A final-answer AgentMessage closes the turn");
+            Item(path, new { type = "AgentMessage", phase = "commentary", content = "Late progress." }, DateTime.UtcNow);
+            var done = reader.Poll().Agents.Single();
+            check(done.State == "completed" && done.Task == "Work complete", "Late public activity does not revive completed work");
+        }
+
+        private static void CheckActionActivity(Action<bool, string> check, string root)
+        {
+            var folder = Path.Combine(root, "action-activity");
+            var path = Session(folder, "root", "", "root", root, null);
+            var reader = new ActivityReader(root, "root", "", folder);
+            reader.Poll();
+            var at = DateTime.UtcNow;
+            Append(path, new { timestamp = at.ToString("o"), type = "response_item", payload = new { type = "custom_tool_call", name = "exec", call_id = "wrapper", input = "await tools.apply_patch('private patch');" } });
+            check(reader.Poll().Agents.Single().Task == "Updating project files", "An exec wrapper exposes its nested file-edit action without exposing arguments");
+            Item(path, new { type = "FileChange", id = "edit", status = "completed", changes = new Dictionary<string, object> { { "private-path", new { diff = "private diff" } }, { "second-private-path", new { diff = "private diff" } } } }, at.AddSeconds(1));
+            Result(path, "wrapper");
+            var edited = reader.Poll().Agents.Single();
+            check(edited.Task == "Updated 2 project files" && edited.State == "working", "File-change summaries survive the outer wrapper result without completing the agent");
+            Append(path, new { timestamp = at.AddSeconds(2).ToString("o"), type = "response_item", payload = new { type = "function_call", name = "functions.exec_command", call_id = "test", arguments = serializer.Serialize(new { cmd = ".\\build.ps1 -Test -Token private-token" }) } });
+            var running = reader.Poll().Agents.Single();
+            check(running.Task == "Running checks", "Known check commands get a useful action label");
+            Item(path, new { type = "CommandExecution", command = new[] { "powershell.exe", "-NoProfile", "-Command", ".\\build.ps1 -Test" }, status = "completed", exit_code = 0, stdout = "private output" }, at.AddSeconds(3));
+            Result(path, "test");
+            var checkedAgent = reader.Poll().Agents.Single();
+            check(checkedAgent.Task == "Checks finished" && checkedAgent.State == "working" && checkedAgent.Ended == DateTime.MinValue, "Successful check metadata updates activity, not whole-turn completion");
+            Item(path, new { type = "CommandExecution", command = "pytest", status = "completed", exit_code = 1, stderr = "private output" }, at.AddSeconds(4));
+            var failed = reader.Poll().Agents.Single();
+            check(failed.Task == "Checks failed (exit 1)" && failed.Events.Last().State == "error" && failed.State == "working", "A nonzero exit marks the failed action while the agent remains able to recover");
+            Item(path, new { type = "FileChange", status = "failed", changes = new Dictionary<string, object>() }, at.AddSeconds(5));
+            check(reader.Poll().Agents.Single().Events.Last().Text == "File update failed", "Failed file edits are not described as successful updates");
+            Item(path, new { type = "CommandExecution", command = "Get-Content build.ps1", status = "completed", exit_code = 0 }, at.AddSeconds(6));
+            check(reader.Poll().Agents.Single().Task == "Read project context", "Reading a build script is not classified as running a build");
+            Item(path, new { type = "CommandExecution", command = "Write-Output 'pytest'", status = "completed", exit_code = 0 }, at.AddSeconds(7));
+            check(reader.Poll().Agents.Single().Task == "Command finished", "A test-runner name in a command argument does not imply tests ran");
+            Item(path, new { type = "CommandExecution", command = "git diff --stat", status = "completed", exit_code = 0 }, at.AddSeconds(8));
+            check(reader.Poll().Agents.Single().Task == "Inspected project changes", "Git inspections are distinguished from generic commands");
+            Event(path, new { type = "item_started", item = new { type = "CommandExecution", command = "dotnet build", status = "in_progress" } });
+            check(reader.Poll().Agents.Single().Task == "Building the project", "Started command items describe ongoing work without claiming success");
+            Call(path, "input", "functions.request_user_input");
+            Item(path, new { type = "CommandExecution", command = "dotnet build", status = "completed", exit_code = 0 }, at.AddSeconds(9));
+            var attention = reader.Poll().Agents.Single();
+            check(attention.State == "attention" && attention.Task == "Waiting for your input in Codex", "Completed action metadata does not dismiss pending attention");
+            check(attention.Events.All(e => !e.Text.Contains("private")), "Activity summaries omit command arguments, paths, output, and diffs");
+            Result(path, "input");
+            Call(path, "repeat-1", "functions.exec_command");
+            var old = reader.Poll().Agents.Single();
+            Append(path, new { timestamp = old.Events.Last().At.AddSeconds(2).ToString("o"), type = "response_item", payload = new { type = "function_call", name = "functions.exec_command", call_id = "repeat-2" } });
+            var repeated = reader.Poll().Agents.Single();
+            check(repeated.Events.Count == old.Events.Count && repeated.Events.Last().At > old.Events.Last().At, "Repeated generic commands refresh the visible event timestamp");
+            Event(path, new { type = "task_complete" });
+            Item(path, new { type = "CommandExecution", command = "dotnet build", status = "completed", exit_code = 0 }, DateTime.UtcNow);
+            var done = reader.Poll().Agents.Single();
+            check(done.State == "completed" && done.Task == "Work complete", "Late rich tool items cannot revive a completed turn");
+        }
+
+        private static void Item(string path, object item, DateTime at)
+        {
+            Append(path, new { timestamp = at.ToString("o"), type = "event_msg", payload = new { type = "item_completed", item = item } });
+        }
+
         private static void CheckHistoricalPin(Action<bool, string> check, string root)
         {
             var folder = Path.Combine(root, "history");
@@ -132,6 +247,35 @@ namespace Orbit
             Session(recent, "recent-root", "", "", root, null);
             var snapshot = new ActivityReader(root, "old-root", "", folder).Poll();
             check(snapshot.Session == "old-root" && snapshot.Agents.Count == 2 && snapshot.Agents.Any(a => a.Id == "old-child"), "An explicit session pin discovers an older rollout and its same-day descendants");
+        }
+
+        private static void CheckFreshSelection(Action<bool, string> check, string root)
+        {
+            var folder = Path.Combine(root, "fresh");
+            Session(folder, "first-root", "", "", root, null);
+            var reader = new ActivityReader(root, "", "", folder);
+            var first = reader.Poll();
+            check(first.Session == "first-root" && first.FocusedSession == "first-root" && first.TotalSessions == 1, "Automatic selection focuses the first active team");
+            Thread.Sleep(1600);
+            Session(folder, "second-root", "", "", root, null);
+            // Stable teams rediscover every 5s; wait so the newer rollout is seen.
+            Thread.Sleep(5200);
+            var second = reader.Poll();
+            check(second.TotalSessions == 2 && second.Sessions.Count == 2, "All active sessions are tracked while the view focuses one");
+            check(second.Session == "second-root" && second.FocusedSession == "second-root", "A newly created session takes focus");
+            check(second.Agents.Count == 1 && second.Agents[0].Id == "second-root", "The focused team shows its own agents");
+            check(second.Sessions[0].RootId == "second-root", "Session summaries order the newest active team first");
+            check(second.Source.Contains("2 sessions"), "Freshness source counts visible sessions");
+            check(second.LastWriteUtc != DateTime.MinValue && !second.CatchingUp, "Freshness tracks the last local write and backlog state");
+
+            var scopeFolder = Path.Combine(root, "scope");
+            Session(scopeFolder, "sub-root", "", "", Path.Combine(root, "sub"), null);
+            var scoped = new ActivityReader(root, "", "", scopeFolder).Poll();
+            check(scoped.Connected && scoped.FocusedSession == "sub-root", "Sessions launched in a workspace subdirectory join the team");
+            var otherFolder = Path.Combine(root, "scope-other");
+            Session(otherFolder, "other-root", "", "", root + "-unrelated", null);
+            var other = new ActivityReader(root, "", "", otherFolder).Poll();
+            check(!other.Connected, "A sibling directory with a shared prefix does not join the team");
         }
 
         private static string Session(string folder, string id, string parent, string session, string workspace, Dictionary<string, object> extra)
