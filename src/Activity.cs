@@ -78,16 +78,7 @@ namespace Orbit
                 return "?";
             }
         }
-        public string ColorCode { get { return ColorFor(Id); } }
-        public Brush ColorBrush { get { return Palette.Color(ColorFor(Id)); } }
-        public static string ColorFor(string id)
-        {
-            var codes = new[] { "#7DD3FC", "#6EE7B7", "#C4B5FD", "#FDBA74", "#F9A8D4", "#5EEAD4", "#FDE68A", "#FDA4AF", "#93C5FD", "#86EFAC" };
-            id = id ?? "";
-            int hash = 0;
-            for (int i = 0; i < id.Length; i++) hash = (hash * 31 + id[i]) & 0x7fffffff;
-            return codes[hash % codes.Length];
-        }
+
         public string Glyph { get { return State == "completed" ? "\uE73E" : State == "attention" || State == "error" ? "\uE7BA" : Role == "explorer" ? "\uE721" : Role == "reviewer" ? "\uE73E" : Role == "tester" ? "\uE9D9" : IsRoot ? "\uE8D7" : "\uE943"; } }
         public string StatusLabel { get { return State == "working" ? "Working" : State == "waiting" ? "Waiting" : State == "completed" ? "Done" : State == "attention" ? "Needs you" : State == "error" ? "Error" : "Idle"; } }
         public string ChildLabel { get { return IsRoot ? "LEAD" : ""; } }
@@ -117,7 +108,6 @@ namespace Orbit
         public bool NeedsAttention;
         public DateTime LastWriteUtc = DateTime.MinValue;
         public bool IsFocused;
-        public string Color { get { return Agent.ColorFor(RootId); } }
     }
     public sealed class Snapshot
     {
