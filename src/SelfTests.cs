@@ -112,6 +112,11 @@ namespace Orbit
                 Check(Flatten(tree.Roots).Count(n => n.Kind == "agent") == 3, "Cycles and unavailable parents never hide an agent");
                 tree.Update(new Agent[0], "", "");
                 Check(tree.Roots.Count == 0, "An empty snapshot clears stale tree branches");
+                var botTree = new AgentTree();
+                botTree.Update(demo.Agents, demo.Session, demo.Project);
+                var botBuilder = botTree.Find("agent:builder");
+                Check(botBuilder.ReplyCount == 1 && botBuilder.HasReplies && botBuilder.ReplyLabel == "1 reply", "Bot cards count nested subagents as replies");
+                Check(botTree.Find("agent:explorer").ReplyCount == 0 && !botTree.Find("agent:explorer").HasReplies, "Leaf bots hide the replies toggle");
 
                 var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
                 using (var signal = new EventWaitHandle(false, EventResetMode.AutoReset))
@@ -121,6 +126,8 @@ namespace Orbit
                     liveWindow.Show(); Pump(400);
                     var nativeTree = (TreeView)liveWindow.FindName("AgentTreeView");
                     Check(liveWindow.IsVisible && Flatten(nativeTree.Items.Cast<TreeNode>()).Count(n => n.Kind == "agent") == 4, "Native tree starts with all four preview agents");
+                    Check(liveWindow.Resources.Contains("SlimBar"), "Slim scrollbar style replaces the wide system bar");
+                    Check(System.Windows.Controls.VirtualizingStackPanel.GetIsVirtualizing(nativeTree), "Agent feed virtualizes bot cards");
                     Check(((SolidColorBrush)nativeTree.Foreground).Color.R > 220, "Native tree text does not inherit the system's black foreground");
                     Check(liveWindow.AllowsTransparency && liveWindow.WindowStyle == WindowStyle.None && liveWindow.Topmost && !liveWindow.ShowInTaskbar, "Widget remains a frameless transparent topmost native window");
                     var glass = (LinearGradientBrush)((Border)liveWindow.FindName("Surface")).Background;
