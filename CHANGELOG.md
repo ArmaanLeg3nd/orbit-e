@@ -44,13 +44,14 @@ from 104 to 113 checks; all green (`.\build.ps1 -Test`).
 
 ### Bot cards instead of a file tree
 
-- Agent rows are compact cards: 26 px avatar circle with neutral initial,
-  status ring, name, task, status pill, elapsed time, and the latest five
-  activity bubbles inline beneath, nested under classic tree chrome
-  (expander arrow column plus guide line).
-- The whole card header is clickable (hover feedback, keyboard
+- Agent rows are compact tree rows: 26 px avatar circle with neutral
+  initial, status ring, name, task, right-aligned status pill and elapsed
+  time, and the latest five activity lines inline beneath, nested under
+  classic tree chrome (expander arrow column plus guide line). An
+  earlier card-container experiment was removed.
+- The whole row header is clickable (hover feedback, keyboard
   accessible) and opens the detail view; the ↗ arrow is gone. Expansion
-  belongs to the tree arrow; the card keeps a static `N replies` label.
+  belongs to the tree arrow; the row keeps a static `N replies` label.
 - Status column (pill, elapsed) is right-aligned, so live rows with long
   raw task text line up exactly like preview rows.
 - Active subagents (`working`, `waiting`, `attention`, `error`)
