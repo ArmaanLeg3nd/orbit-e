@@ -46,10 +46,11 @@ from 104 to 113 checks; all green (`.\build.ps1 -Test`).
 
 - Agent rows are compact cards: 26 px avatar circle with neutral initial,
   status ring, name, task, status pill, elapsed time, and the latest five
-  activity bubbles inline beneath. No tree lines, no expander column.
+  activity bubbles inline beneath, nested under classic tree chrome
+  (expander arrow column plus guide line).
 - The whole card header is clickable (hover feedback, keyboard
-  accessible) and opens the detail view; the ↗ arrow is gone. The reply
-  toggle (`N replies`) sits outside the button so the two never conflict.
+  accessible) and opens the detail view; the ↗ arrow is gone. Expansion
+  belongs to the tree arrow; the card keeps a static `N replies` label.
 - Status column (pill, elapsed) is right-aligned, so live rows with long
   raw task text line up exactly like preview rows.
 - Active subagents (`working`, `waiting`, `attention`, `error`)

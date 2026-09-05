@@ -25,46 +25,45 @@
     <Style TargetType="TreeViewItem">
       <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="AutomationProperties.Name" Value="{Binding AccessibleName}"/>
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TreeViewItem">
-        <StackPanel>
-          <Border x:Name="Row" CornerRadius="8" Background="Transparent">
-            <ContentPresenter x:Name="PART_Header" ContentSource="Header" HorizontalAlignment="Stretch"/>
-          </Border>
-          <ItemsPresenter x:Name="ItemsHost" Margin="24,0,0,0"/>
-        </StackPanel>
-        <ControlTemplate.Triggers><Trigger Property="IsExpanded" Value="False"><Setter TargetName="ItemsHost" Property="Visibility" Value="Collapsed"/></Trigger><DataTrigger Binding="{Binding Kind}" Value="session"><Setter TargetName="ItemsHost" Property="Margin" Value="0"/></DataTrigger><Trigger Property="IsSelected" Value="True"><Setter TargetName="Row" Property="Background" Value="#11FFFFFF"/></Trigger><Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Row" Property="Background" Value="#14FFFFFF"/></Trigger></ControlTemplate.Triggers>
+        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="16"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+          <Border x:Name="Row" Grid.ColumnSpan="2" CornerRadius="8" Background="Transparent"/>
+          <ToggleButton x:Name="Expander" Style="{StaticResource BranchToggle}" VerticalAlignment="Top" Margin="0,4,0,0" IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"/>
+          <ContentPresenter Grid.Column="1" x:Name="PART_Header" ContentSource="Header" HorizontalAlignment="Stretch"/>
+          <Border x:Name="ChildrenBorder" Grid.Row="1" Grid.Column="1" BorderBrush="#28FFFFFF" BorderThickness="1,0,0,0" Margin="-8,0,0,0" Padding="7,0,0,0"><ItemsPresenter x:Name="ItemsHost"/></Border>
+        </Grid>
+        <ControlTemplate.Triggers><Trigger Property="IsExpanded" Value="False"><Setter TargetName="ChildrenBorder" Property="Visibility" Value="Collapsed"/></Trigger><DataTrigger Binding="{Binding Kind}" Value="session"><Setter TargetName="Expander" Property="Visibility" Value="Collapsed"/><Setter TargetName="ChildrenBorder" Property="Margin" Value="0"/><Setter TargetName="ChildrenBorder" Property="Padding" Value="0"/><Setter TargetName="ChildrenBorder" Property="BorderThickness" Value="0"/></DataTrigger><Trigger Property="HasItems" Value="False"><Setter TargetName="Expander" Property="Visibility" Value="Hidden"/></Trigger><Trigger Property="IsSelected" Value="True"><Setter TargetName="Row" Property="Background" Value="#11FFFFFF"/></Trigger><Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Row" Property="Background" Value="#14FFFFFF"/></Trigger></ControlTemplate.Triggers>
       </ControlTemplate></Setter.Value></Setter>
     </Style>
     <HierarchicalDataTemplate DataType="{x:Type local:TreeNode}" ItemsSource="{Binding Children}">
       <Grid ToolTip="{Binding Hint}">
         <Grid x:Name="AgentHeader" Margin="0,2">
           <Border Background="#16FFFFFF" BorderBrush="#14FFFFFF" BorderThickness="1" CornerRadius="10"/>
-          <Grid Margin="7,7,6,7"><Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-            <Button Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" Style="{StaticResource IconButton}" Width="Auto" Height="Auto" Padding="0" HorizontalContentAlignment="Stretch" Tag="{Binding Agent}" AutomationProperties.Name="{Binding AccessibleName}" ToolTip="Open agent details">
+          <Grid Margin="7,7,6,7"><Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <Button Grid.Column="0" Grid.ColumnSpan="2" Style="{StaticResource IconButton}" Width="Auto" Height="Auto" Padding="0" HorizontalContentAlignment="Stretch" Tag="{Binding Agent}" AutomationProperties.Name="{Binding AccessibleName}" ToolTip="Open agent details">
               <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                 <Grid Width="26" Height="26" VerticalAlignment="Top" ToolTip="{Binding Agent.Glyph}">
-              <Border Width="26" Height="26" CornerRadius="13" Background="#22FFFFFF" BorderBrush="{Binding StatusBrush}" BorderThickness="1.5"/>
-              <TextBlock Text="{Binding Agent.AvatarInitial}" FontFamily="Segoe UI" FontSize="12" FontWeight="SemiBold" Foreground="#E8E8E8" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                  <Border Width="26" Height="26" CornerRadius="13" Background="#22FFFFFF" BorderBrush="{Binding StatusBrush}" BorderThickness="1.5"/>
+                  <TextBlock Text="{Binding Agent.AvatarInitial}" FontFamily="Segoe UI" FontSize="12" FontWeight="SemiBold" Foreground="#E8E8E8" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                   <Ellipse x:Name="StatusDot" Width="8" Height="8" Fill="{Binding StatusBrush}" Stroke="#1E1E1E" StrokeThickness="2" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-1,-1"/>
                 </Grid>
                 <StackPanel Grid.Column="1" Margin="7,0,5,0">
                   <TextBlock Text="{Binding Title}" Foreground="#F4F6FB" FontWeight="SemiBold" FontSize="12" TextTrimming="CharacterEllipsis" MaxWidth="180"/>
                   <TextBlock Text="{Binding Subtitle}" Foreground="#C0C5CE" FontSize="10" Margin="0,2,0,0" TextWrapping="Wrap" MaxHeight="28" TextTrimming="CharacterEllipsis"/>
+                  <TextBlock Text="{Binding ReplyLabel}" Foreground="#9BA3B0" FontSize="9" Margin="0,2,0,0">
+                    <TextBlock.Style>
+                      <Style TargetType="TextBlock">
+                        <Setter Property="Visibility" Value="Visible"/>
+                        <Style.Triggers><DataTrigger Binding="{Binding HasReplies}" Value="False"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers>
+                      </Style>
+                    </TextBlock.Style>
+                  </TextBlock>
                 </StackPanel>
               </Grid>
             </Button>
-            <StackPanel Grid.Row="0" Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Top">
+            <StackPanel Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Top">
               <Border CornerRadius="8" Background="#22FFFFFF" Padding="6,1" HorizontalAlignment="Right"><TextBlock Text="{Binding Status}" Foreground="{Binding StatusBrush}" FontSize="9" FontWeight="SemiBold"/></Border>
               <TextBlock Text="{Binding Elapsed}" Foreground="#9BA3B0" FontFamily="Consolas" FontSize="9" Margin="0,3,0,0" HorizontalAlignment="Right"/>
             </StackPanel>
-            <ToggleButton Grid.Row="1" Grid.Column="1" IsChecked="{Binding IsExpanded, Mode=TwoWay}" Background="Transparent" BorderThickness="0" Cursor="Hand" AutomationProperties.Name="Toggle replies">
-              <ToggleButton.Style>
-                <Style TargetType="ToggleButton">
-                  <Setter Property="Visibility" Value="Visible"/><Setter Property="Margin" Value="0,2,0,0"/>
-                  <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ToggleButton"><TextBlock Text="{Binding ReplyLabel}" Foreground="#9BA3B0" FontSize="9"/></ControlTemplate></Setter.Value></Setter>
-                  <Style.Triggers><DataTrigger Binding="{Binding HasReplies}" Value="False"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers>
-                </Style>
-              </ToggleButton.Style>
-            </ToggleButton>
           </Grid>
         </Grid>
         <Grid x:Name="GroupHeader" Visibility="Collapsed" Margin="4,10,4,4"><TextBlock Text="{Binding Title}" FontSize="11" Foreground="#8E96A3" HorizontalAlignment="Center"/></Grid>
