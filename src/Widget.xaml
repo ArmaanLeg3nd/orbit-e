@@ -38,7 +38,13 @@
       <Grid ToolTip="{Binding Hint}">
         <Grid x:Name="AgentHeader" Margin="0,2">
           <Grid Margin="2,6,1,6"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <Button Grid.Column="0" Style="{StaticResource IconButton}" Width="Auto" Height="Auto" Padding="0" HorizontalContentAlignment="Stretch" Tag="{Binding Agent}" AutomationProperties.Name="{Binding AccessibleName}" ToolTip="Open agent details">
+            <Button Grid.Column="0" Width="Auto" Height="Auto" Padding="0" HorizontalContentAlignment="Stretch" Tag="{Binding Agent}" AutomationProperties.Name="{Binding AccessibleName}" ToolTip="Open agent details">
+              <Button.Style>
+                <Style TargetType="Button">
+                  <Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Cursor" Value="Hand"/>
+                  <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border x:Name="Chrome" Background="Transparent" BorderThickness="1" BorderBrush="Transparent" CornerRadius="6"><ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="#60FFFFFF"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
+                </Style>
+              </Button.Style>
               <StackPanel Margin="0,0,8,0">
                 <TextBlock Text="{Binding Title}" Foreground="#F4F6FB" FontWeight="SemiBold" FontSize="12" TextTrimming="CharacterEllipsis"/>
                 <TextBlock Text="{Binding Subtitle}" Foreground="#C0C5CE" FontSize="10" Margin="0,2,0,0" TextWrapping="Wrap" MaxHeight="28" TextTrimming="CharacterEllipsis"/>
@@ -60,8 +66,8 @@
         </Grid>
         <Grid x:Name="GroupHeader" Visibility="Collapsed" Margin="4,10,4,4"><TextBlock Text="{Binding Title}" FontSize="11" Foreground="#8E96A3" HorizontalAlignment="Center"/></Grid>
         <Grid x:Name="EventHeader" Visibility="Collapsed" Margin="2,5,3,5">
-          <Grid.ColumnDefinitions><ColumnDefinition Width="6"/><ColumnDefinition Width="*"/><ColumnDefinition Width="52"/></Grid.ColumnDefinitions>
-          <Ellipse Width="6" Height="6" Fill="{Binding Activity.Brush}" VerticalAlignment="Top" Margin="0,4,0,0"/>
+          <Grid.ColumnDefinitions><ColumnDefinition Width="10"/><ColumnDefinition Width="*"/><ColumnDefinition Width="52"/></Grid.ColumnDefinitions>
+          <Ellipse Width="6" Height="6" Fill="{Binding Activity.Brush}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="0,4,0,0"/>
           <TextBlock Grid.Column="1" Text="{Binding Title}" TextWrapping="Wrap" MaxHeight="40" TextTrimming="CharacterEllipsis" FontSize="10" Foreground="#D6DBE3" Margin="2,0,6,0"/>
           <TextBlock Grid.Column="2" Text="{Binding Elapsed}" Foreground="#7E868F" FontFamily="Consolas" FontSize="9" Margin="0,2,0,0" HorizontalAlignment="Right"/>
         </Grid>
@@ -87,7 +93,7 @@
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"><Button x:Name="SettingsButton" Style="{StaticResource IconButton}" ToolTip="Settings" AutomationProperties.Name="Widget settings"><TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE713;" FontSize="12"/></Button><Button x:Name="CollapseButton" Style="{StaticResource IconButton}" ToolTip="Collapse · Esc" AutomationProperties.Name="Collapse widget"><Path Data="M 0,0 L 9,0" Stroke="#C4C4C4" StrokeThickness="1"/></Button></StackPanel>
           </Grid>
           <Grid Grid.Row="1" Margin="-3,5,-3,5" x:Name="ContentArea">
-            <TreeView x:Name="AgentTreeView" Foreground="#F3F3F3" Background="Transparent" BorderThickness="0" Padding="0" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" VirtualizingStackPanel.IsVirtualizing="True" VirtualizingStackPanel.VirtualizationMode="Recycling" AutomationProperties.Name="Session, agents, and activity tree"/>
+            <TreeView x:Name="AgentTreeView" Foreground="#F3F3F3" Background="Transparent" BorderThickness="0" Padding="0,0,4,0" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" VirtualizingStackPanel.IsVirtualizing="True" VirtualizingStackPanel.VirtualizationMode="Recycling" AutomationProperties.Name="Session, agents, and activity tree"/>
             <StackPanel x:Name="EmptyState" Visibility="Collapsed" VerticalAlignment="Center" Margin="22,0"><TextBlock Text="No agents yet" FontSize="15" FontWeight="SemiBold"/><TextBlock x:Name="EmptyDescription" Text="Activity will appear here as your team starts working." Foreground="#BDBDBD" FontSize="12" TextWrapping="Wrap" Margin="0,8,0,12"/><Button x:Name="PreviewButton" Content="Preview the widget" Style="{StaticResource TextButton}" Background="#15FFFFFF" HorizontalAlignment="Left"/></StackPanel>
           </Grid>
           <Grid Grid.Row="2" x:Name="Footer"><Border BorderBrush="#22FFFFFF" BorderThickness="0,1,0,0"/><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock x:Name="SourceLabel" Text="Local activity" Foreground="#B0B0B0" FontSize="10" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="1,0,6,0"/><Button x:Name="SourceButton" Grid.Column="1" Content="Codex" Style="{StaticResource TextButton}" FontSize="10" Height="25"/></Grid></Grid>
