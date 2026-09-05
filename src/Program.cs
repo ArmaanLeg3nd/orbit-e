@@ -289,7 +289,7 @@ namespace Orbit
         {
             var agent = agents.FirstOrDefault(a => a.Id == detailId);
             if (agent == null) { Back(); return; }
-            Text("DetailName", agent.Name); Text("DetailStatus", agent.StatusLabel); Text("DetailElapsed", agent.Elapsed); Text("DetailTask", agent.Task);
+            Text("DetailName", agent.DisplayName); Text("DetailStatus", agent.StatusLabel); Text("DetailElapsed", agent.Elapsed); Text("DetailTask", agent.Task);
             Find<TextBlock>("DetailStatus").Foreground = agent.AccentBrush;
             var parent = agents.FirstOrDefault(a => a.Id == agent.ParentId);
             Text("DetailParent", agent.IsRoot ? "Coordinating this workspace" : parent != null ? "Spawned by " + parent.Name : String.IsNullOrEmpty(agent.ParentId) ? "Team agent" : "Parent · " + Json.Clean(agent.ParentId, 34));

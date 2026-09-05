@@ -116,6 +116,7 @@ namespace Orbit
                 botTree.Update(demo.Agents, demo.Session, demo.Project);
                 var botBuilder = botTree.Find("agent:builder");
                 Check(botBuilder.ReplyCount == 1 && botBuilder.HasReplies && botBuilder.ReplyLabel == "1 reply", "Bot cards count nested subagents as replies");
+                Check(botTree.Find("agent:builder").Title == "/Builder" && new Agent { Id = "x", Name = "Session 17:17", IsRoot = true }.DisplayName == "/root", "Leads show as /root, subagents with a slash prefix");
                 var actRoot = new Agent { Id = "aroot", Name = "Root", State = "working", Task = "Leading", Started = DateTime.UtcNow.AddMinutes(-2), Updated = DateTime.UtcNow };
                 var actSub = new Agent { Id = "asub", ParentId = "aroot", Name = "Sub", State = "working", Task = "Helping", Started = DateTime.UtcNow.AddMinutes(-1), Updated = DateTime.UtcNow };
                 actSub.Events.Add(new ActivityEvent { AgentId = "asub", Agent = "Sub", Text = "Live progress", State = "working", At = DateTime.UtcNow });
@@ -153,7 +154,7 @@ namespace Orbit
                     var rowButton = FindAgentButton(nativeTree, "builder");
                     Check(rowButton != null, "Agent details have an accessible native button");
                     rowButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, rowButton)); Pump(230);
-                    Check(((FrameworkElement)liveWindow.FindName("DetailView")).Visibility == Visibility.Visible && ((TextBlock)liveWindow.FindName("DetailName")).Text == "Builder", "Agent detail button opens the correct branch");
+                    Check(((FrameworkElement)liveWindow.FindName("DetailView")).Visibility == Visibility.Visible && ((TextBlock)liveWindow.FindName("DetailName")).Text == "/Builder", "Agent detail button opens the correct branch");
                     Render(liveWindow, Path.Combine(root, "detail.png"));
                     Press(liveWindow, "BackButton"); Press(liveWindow, "SettingsButton"); Pump(230);
                     Check(((FrameworkElement)liveWindow.FindName("SettingsView")).Visibility == Visibility.Visible, "Settings open inside the same window");

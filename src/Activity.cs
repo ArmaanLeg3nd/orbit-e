@@ -70,6 +70,7 @@ namespace Orbit
         public Brush AccentBrush { get { return Palette.State(State); } }
         public Brush SoftBrush { get { return Palette.Color("#20FFFFFF"); } }
         public string Glyph { get { return State == "completed" ? "\uE73E" : State == "attention" || State == "error" ? "\uE7BA" : Role == "explorer" ? "\uE721" : Role == "reviewer" ? "\uE73E" : Role == "tester" ? "\uE9D9" : IsRoot ? "\uE8D7" : "\uE943"; } }
+        public string DisplayName { get { return IsRoot ? "/root" : (Name ?? "").StartsWith("/") ? Name : "/" + Name; } }
         public string StatusLabel { get { return State == "working" ? "Working" : State == "waiting" ? "Waiting" : State == "completed" ? "Done" : State == "attention" ? "Needs you" : State == "error" ? "Error" : "Idle"; } }
         public string ChildLabel { get { return IsRoot ? "LEAD" : ""; } }
         public string AccessibleName { get { return Name + ", " + StatusLabel + ", " + Task; } }

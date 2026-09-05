@@ -45,8 +45,9 @@ from 104 to 113 checks; all green (`.\build.ps1 -Test`).
 ### Bot cards instead of a file tree
 
 - Agent rows are the original compact text rows under classic tree chrome
-  (expander arrow column plus guide line): name, task, static `N replies`
-  label, and the latest five activity lines inline beneath. The avatar,
+  (expander arrow column plus guide line): path-style name (`/root` for
+  the lead, `/name` for subagents), task, static `N replies` label, and
+  the latest five activity lines inline beneath. The avatar,
   card-container, and pill experiments were all tried and removed.
 - The whole row header is clickable (hover feedback, keyboard
   accessible) and opens the detail view; the ↗ arrow is gone. Status is

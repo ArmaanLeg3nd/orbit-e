@@ -18,7 +18,7 @@ namespace Orbit
         public ObservableCollection<TreeNode> Children { get { return Items; } }
         private bool expanded;
         public bool IsExpanded { get { return expanded; } set { if (expanded == value) return; expanded = value; Notify(); } }
-        public string Title { get { return Kind == "agent" ? Agent.Name : Kind == "event" ? Activity.Text : Caption; } }
+        public string Title { get { return Kind == "agent" ? Agent.DisplayName : Kind == "event" ? Activity.Text : Caption; } }
         public string Subtitle { get { return Kind == "agent" ? Agent.Task : ""; } }
         public string Status { get { return Kind == "agent" ? Agent.StatusLabel : ""; } }
         public System.Windows.Media.Brush StatusBrush { get { return Kind == "agent" ? Agent.AccentBrush : Palette.State("idle"); } }
