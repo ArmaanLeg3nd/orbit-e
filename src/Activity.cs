@@ -460,7 +460,7 @@ namespace Orbit
             var agent = new Agent { Id = id, ParentId = parent, IsRoot = parent == "", Name = Json.Clean(name, 32), Role = role, Task = "Waiting for activity", State = "idle", Started = Json.Time(meta, "timestamp", file.CreationTimeUtc), Updated = file.LastWriteTimeUtc, SessionRoot = !String.IsNullOrEmpty(session) ? session : id };
             sessions[file.FullName] = new SessionFile { Path = file.FullName, RootId = session, DeclaredRootId = session, MetadataParentId = parent, Workspace = cwd, Agent = agent, InitialStarted = agent.Started };
         }
-        private static string AgentName(Dictionary<string, object> meta, Dictionary<string, object> spawn, string id, string parent)
+        private string AgentName(Dictionary<string, object> meta, Dictionary<string, object> spawn, string id, string parent)
         {
             var name = Json.Text(meta, "task_name");
             if (name == "") name = Json.Text(spawn, "task_name");
@@ -473,7 +473,13 @@ namespace Orbit
             }
             if (name == "") name = Json.Text(meta, "agent_nickname");
             if (name == "") name = Json.Text(spawn, "agent_nickname");
-            return name == "" ? (parent == "" ? "Coordinator" : "Agent") + " " + id.Substring(0, Math.Min(8, id.Length)) : name;
+            if (name != "") return name;
+            if (parent == "")
+            {
+                var project = new DirectoryInfo(workspace).Name;
+                return String.IsNullOrEmpty(project) ? "Lead" : project;
+            }
+            return "Agent " + id.Substring(0, Math.Min(8, id.Length));
         }
         private void DiscoverPinned()
         {

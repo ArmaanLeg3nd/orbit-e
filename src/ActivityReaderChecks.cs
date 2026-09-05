@@ -73,6 +73,10 @@ namespace Orbit
             check(names["explicit"] == "Audit session reader", "An explicit task name takes precedence over the agent path and nickname");
             check(names["path"] == "nested_checks", "Nested spawn metadata supplies the assigned agent path name");
             check(names["nickname"] == "Zeno" && names["12345678-rest"] == "Agent 12345678", "Names fall back to recorded nicknames and then a stable ID");
+            var loneFolder = Path.Combine(root, "names-lone-root");
+            Session(loneFolder, "lone", "", "", root, null);
+            var lone = new ActivityReader(root, "", "", loneFolder).Poll().Agents.Single(a => a.Id == "lone");
+            check(lone.Name == new DirectoryInfo(root).Name, "A nameless lead takes the workspace name instead of a Coordinator ID");
         }
 
         private static void CheckPendingCalls(Action<bool, string> check, string root)
