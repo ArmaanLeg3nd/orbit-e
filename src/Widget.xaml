@@ -37,31 +37,24 @@
     <HierarchicalDataTemplate DataType="{x:Type local:TreeNode}" ItemsSource="{Binding Children}">
       <Grid ToolTip="{Binding Hint}">
         <Grid x:Name="AgentHeader" Margin="0,2">
-          <Grid Margin="2,6,1,6"><Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <Button Grid.Column="0" Grid.ColumnSpan="2" Style="{StaticResource IconButton}" Width="Auto" Height="Auto" Padding="0" HorizontalContentAlignment="Stretch" Tag="{Binding Agent}" AutomationProperties.Name="{Binding AccessibleName}" ToolTip="Open agent details">
-              <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                <Grid Width="26" Height="26" VerticalAlignment="Top" ToolTip="{Binding Agent.Glyph}">
-                  <Border Width="26" Height="26" CornerRadius="13" Background="#22FFFFFF" BorderBrush="{Binding StatusBrush}" BorderThickness="1.5"/>
-                  <TextBlock Text="{Binding Agent.AvatarInitial}" FontFamily="Segoe UI" FontSize="12" FontWeight="SemiBold" Foreground="#E8E8E8" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                  <Ellipse x:Name="StatusDot" Width="8" Height="8" Fill="{Binding StatusBrush}" Stroke="#1E1E1E" StrokeThickness="2" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-1,-1"/>
-                </Grid>
-                <StackPanel Grid.Column="1" Margin="7,0,5,0">
-                  <TextBlock Text="{Binding Title}" Foreground="#F4F6FB" FontWeight="SemiBold" FontSize="12" TextTrimming="CharacterEllipsis" MaxWidth="180"/>
-                  <TextBlock Text="{Binding Subtitle}" Foreground="#C0C5CE" FontSize="10" Margin="0,2,0,0" TextWrapping="Wrap" MaxHeight="28" TextTrimming="CharacterEllipsis"/>
-                  <TextBlock Text="{Binding ReplyLabel}" Foreground="#9BA3B0" FontSize="9" Margin="0,2,0,0">
-                    <TextBlock.Style>
-                      <Style TargetType="TextBlock">
-                        <Setter Property="Visibility" Value="Visible"/>
-                        <Style.Triggers><DataTrigger Binding="{Binding HasReplies}" Value="False"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers>
-                      </Style>
-                    </TextBlock.Style>
-                  </TextBlock>
-                </StackPanel>
-              </Grid>
+          <Grid Margin="2,6,1,6"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <Button Grid.Column="0" Style="{StaticResource IconButton}" Width="Auto" Height="Auto" Padding="0" HorizontalContentAlignment="Stretch" Tag="{Binding Agent}" AutomationProperties.Name="{Binding AccessibleName}" ToolTip="Open agent details">
+              <StackPanel Margin="0,0,8,0">
+                <TextBlock Text="{Binding Title}" Foreground="#F4F6FB" FontWeight="SemiBold" FontSize="12" TextTrimming="CharacterEllipsis"/>
+                <TextBlock Text="{Binding Subtitle}" Foreground="#C0C5CE" FontSize="10" Margin="0,2,0,0" TextWrapping="Wrap" MaxHeight="28" TextTrimming="CharacterEllipsis"/>
+                <TextBlock Text="{Binding ReplyLabel}" Foreground="#9BA3B0" FontSize="9" Margin="0,2,0,0">
+                  <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                      <Setter Property="Visibility" Value="Visible"/>
+                      <Style.Triggers><DataTrigger Binding="{Binding HasReplies}" Value="False"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers>
+                    </Style>
+                  </TextBlock.Style>
+                </TextBlock>
+              </StackPanel>
             </Button>
-            <StackPanel Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Top">
-              <Border CornerRadius="8" Background="#22FFFFFF" Padding="6,1" HorizontalAlignment="Right"><TextBlock Text="{Binding Status}" Foreground="{Binding StatusBrush}" FontSize="9" FontWeight="SemiBold"/></Border>
-              <TextBlock Text="{Binding Elapsed}" Foreground="#9BA3B0" FontFamily="Consolas" FontSize="9" Margin="0,3,0,0" HorizontalAlignment="Right"/>
+            <StackPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Top">
+              <TextBlock Text="{Binding Status}" Foreground="{Binding StatusBrush}" FontSize="11" HorizontalAlignment="Right"/>
+              <TextBlock Text="{Binding Elapsed}" Foreground="#9BA3B0" FontFamily="Consolas" FontSize="10" Margin="0,3,0,0" HorizontalAlignment="Right"/>
             </StackPanel>
           </Grid>
         </Grid>
@@ -76,10 +69,6 @@
       <HierarchicalDataTemplate.Triggers>
         <DataTrigger Binding="{Binding Kind}" Value="session"><Setter TargetName="AgentHeader" Property="Visibility" Value="Collapsed"/><Setter TargetName="GroupHeader" Property="Visibility" Value="Visible"/></DataTrigger>
         <DataTrigger Binding="{Binding Kind}" Value="event"><Setter TargetName="AgentHeader" Property="Visibility" Value="Collapsed"/><Setter TargetName="EventHeader" Property="Visibility" Value="Visible"/></DataTrigger>
-        <DataTrigger Binding="{Binding Agent.State}" Value="working">
-          <DataTrigger.EnterActions><BeginStoryboard><Storyboard RepeatBehavior="Forever" AutoReverse="True"><DoubleAnimation Storyboard.TargetName="StatusDot" Storyboard.TargetProperty="Opacity" From="1" To="0.35" Duration="0:0:0.8"/></Storyboard></BeginStoryboard></DataTrigger.EnterActions>
-          <DataTrigger.ExitActions><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="StatusDot" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.2"/></Storyboard></BeginStoryboard></DataTrigger.ExitActions>
-        </DataTrigger>
       </HierarchicalDataTemplate.Triggers>
     </HierarchicalDataTemplate>
     <DataTemplate x:Key="EventTemplate"><Grid Margin="0,6"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="40"/></Grid.ColumnDefinitions><TextBlock Text="{Binding Text}" TextWrapping="Wrap" FontSize="12" Foreground="#D0D0D0" Margin="0,0,9,0"/><TextBlock Grid.Column="1" Text="{Binding TimeLabel}" Foreground="#A0A0A0" FontFamily="Consolas" FontSize="10" HorizontalAlignment="Right"/></Grid></DataTemplate>

@@ -69,16 +69,6 @@ namespace Orbit
         public List<ActivityEvent> Events = new List<ActivityEvent>();
         public Brush AccentBrush { get { return Palette.State(State); } }
         public Brush SoftBrush { get { return Palette.Color("#20FFFFFF"); } }
-        public string AvatarInitial
-        {
-            get
-            {
-                if (!String.IsNullOrEmpty(Name)) return Name.Substring(0, 1).ToUpperInvariant();
-                if (!String.IsNullOrEmpty(Id)) return Id.Substring(0, 1).ToUpperInvariant();
-                return "?";
-            }
-        }
-
         public string Glyph { get { return State == "completed" ? "\uE73E" : State == "attention" || State == "error" ? "\uE7BA" : Role == "explorer" ? "\uE721" : Role == "reviewer" ? "\uE73E" : Role == "tester" ? "\uE9D9" : IsRoot ? "\uE8D7" : "\uE943"; } }
         public string StatusLabel { get { return State == "working" ? "Working" : State == "waiting" ? "Waiting" : State == "completed" ? "Done" : State == "attention" ? "Needs you" : State == "error" ? "Error" : "Idle"; } }
         public string ChildLabel { get { return IsRoot ? "LEAD" : ""; } }
