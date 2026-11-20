@@ -4,7 +4,7 @@ Orbit E(volved) focuses on reading live and historical Codex workflows on Window
 
 ## Priorities
 
-- Make large workflows easier to navigate. Evaluate branch folding and agent search against long, nested test sessions.
+- Keep live workflows easy to scan. Verify that nested branches with active agents stay visible.
 - Make important outcomes easy to find in long chats. Explore jumping between recorded turns and public results.
 - Improve coverage of supported rollout formats with small, synthetic fixtures, especially for partially written logs and parent records that arrive after their children.
 - Test the window on multiple monitors and at different DPI settings. Keep the compact and graph views aligned on motion, keyboard navigation, and glass styling.

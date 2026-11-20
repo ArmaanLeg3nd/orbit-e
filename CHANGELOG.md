@@ -3,7 +3,7 @@
 ## Orbit E(volved) — unreleased
 
 - Added an optional Windows sign-in launch setting.
-- Added a cross-project Active view, chat and agent search, and shortcuts to Codex Desktop.
+- Added a cross-project Active view and shortcuts to Codex Desktop.
 - Added completed-branch folding and a clickable list of changed files by agent.
 - Renamed the app, executable, resources, and workspace settings directory for Orbit E(volved).
 

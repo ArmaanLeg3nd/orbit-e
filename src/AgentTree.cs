@@ -80,22 +80,18 @@ namespace OrbitEvolved
             Sync(Roots, roots);
             foreach (var key in nodes.Keys.Where(key => !used.Contains(key)).ToList()) nodes.Remove(key);
         }
-        internal void UpdateQuickCatalog(IEnumerable<ChatSummary> chats, Dictionary<string, ActiveChatEntry> active, string query)
+        internal void UpdateActiveCatalog(IEnumerable<ActiveChatEntry> active)
         {
-            var words = query.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
             var used = new HashSet<string>();
             var rows = new List<TreeNode>();
-            foreach (var chat in chats)
+            foreach (var entry in active)
             {
-                var searchable = chat.Title + " " + chat.ProjectName;
-                if (!words.All(word => searchable.IndexOf(word, StringComparison.OrdinalIgnoreCase) >= 0)) continue;
+                var chat = entry.Chat;
                 var row = Get("chat:" + chat.Id, "chat", used);
                 row.Chat = chat;
                 row.Caption = chat.Title;
-                ActiveChatEntry entry;
-                var state = active.TryGetValue(chat.Id, out entry) ? entry.Status + " · " : "";
-                row.Description = state + chat.ProjectName + (chat.Archived ? " · Archived" : "");
-                row.ChatNeedsAttention = entry != null && entry.Priority <= 1;
+                row.Description = entry.Status + " · " + chat.ProjectName;
+                row.ChatNeedsAttention = entry.Priority <= 1;
                 row.GroupHint = row.Caption + "\n" + row.Description;
                 row.Notify();
                 rows.Add(row);

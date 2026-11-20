@@ -96,7 +96,7 @@ namespace OrbitEvolved
         private readonly AgentTree tree = new AgentTree();
         private readonly AgentTree catalogTree = new AgentTree();
         private List<ChatSummary> displayedCatalog;
-        private readonly AgentTree quickCatalog = new AgentTree();
+        private readonly AgentTree activeCatalog = new AgentTree();
         private bool activeOnly;
         private string selectedChat;
         private string openGraphForChat;
@@ -154,26 +154,6 @@ namespace OrbitEvolved
             Click("ChatFilesButton", delegate { OpenGraph(); if (graph != null) graph.ShowFiles(); });
             Click("AllChatsButton", delegate { activeOnly = false; RefreshCatalog(current); });
             Click("ActiveChatsButton", delegate { activeOnly = true; RefreshCatalog(current); });
-            Click("FindChatButton", ShowChatSearch);
-            var search = Find<TextBox>("ChatSearch");
-            search.TextChanged += delegate { if (current.Chats != null && selectedChat == null) RefreshCatalog(current); };
-            search.PreviewKeyDown += delegate(object sender, KeyEventArgs e)
-            {
-                if (e.Key == Key.Escape)
-                {
-                    search.Visibility = Visibility.Collapsed;
-                    search.Clear();
-                    RefreshCatalog(current);
-                    Find<Button>("FindChatButton").Focus();
-                    e.Handled = true;
-                }
-                else if (e.Key == Key.Enter)
-                {
-                    var match = quickCatalog.Roots.FirstOrDefault();
-                    if (match != null) SelectChat(match.Chat.Id, activeOnly);
-                    e.Handled = true;
-                }
-            };
             Click("SettingsBackButton", Back);
             Click("BackButton", Back);
             Click("PreviewButton", delegate { SetPreview(true); Back(); });
@@ -216,13 +196,7 @@ namespace OrbitEvolved
             };
             Window.KeyDown += delegate(object sender, KeyEventArgs e)
             {
-                if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control &&
-                    !collapsed && current.Chats != null && selectedChat == null && Find<Grid>("ExpandedView").IsVisible)
-                {
-                    ShowChatSearch();
-                    e.Handled = true;
-                }
-                else if (e.Key == Key.Escape) { if (Find<Grid>("SettingsView").Visibility == Visibility.Visible || detailId != null) Back(); else if (!collapsed) ToggleCollapsed(); e.Handled = true; }
+                if (e.Key == Key.Escape) { if (Find<Grid>("SettingsView").Visibility == Visibility.Visible || detailId != null) Back(); else if (!collapsed) ToggleCollapsed(); e.Handled = true; }
                 else if ((e.Key == Key.Enter || e.Key == Key.Space) && collapsed) { OpenFromPill(); e.Handled = true; }
                 else if (e.Key == Key.Q && Keyboard.Modifiers == ModifierKeys.Control) { Quit(); e.Handled = true; }
             };
@@ -421,38 +395,20 @@ namespace OrbitEvolved
             else if (graph != null && graphChatId == selectedChat) UpdateGraph(snapshot);
             tray.Text = Json.Clean(Product.Name + " · " + (preview ? "Preview · " : "") + title, 63);
         }
-        private void ShowChatSearch()
-        {
-            var search = Find<TextBox>("ChatSearch");
-            search.Visibility = Visibility.Visible;
-            RefreshCatalog(current);
-            search.Focus();
-            search.SelectAll();
-        }
         private void RefreshCatalog(Snapshot snapshot)
         {
             if (snapshot.Chats == null) return;
-            var search = Find<TextBox>("ChatSearch");
-            var searching = search.Visibility == Visibility.Visible;
-            var flat = activeOnly || searching;
-            if (flat)
-            {
-                var active = snapshot.ActiveChatEntries.ToDictionary(entry => entry.Chat.Id, StringComparer.Ordinal);
-                quickCatalog.UpdateQuickCatalog(activeOnly ? snapshot.ActiveChatEntries.Select(entry => entry.Chat) : snapshot.Chats,
-                    active, searching ? search.Text : "");
-            }
+            if (activeOnly) activeCatalog.UpdateActiveCatalog(snapshot.ActiveChatEntries);
             var treeView = Find<TreeView>("AgentTreeView");
-            treeView.ItemsSource = flat ? quickCatalog.Roots : catalogTree.Roots;
+            treeView.ItemsSource = activeOnly ? activeCatalog.Roots : catalogTree.Roots;
             Find<Button>("AllChatsButton").Background = Palette.Color(activeOnly ? "#0CFFFFFF" : "#30FFFFFF");
             Find<Button>("ActiveChatsButton").Background = Palette.Color(activeOnly ? "#30FFFFFF" : "#0CFFFFFF");
             Find<Button>("ActiveChatsButton").Content = snapshot.ActiveChats > 0 ? "Active (" + snapshot.ActiveChats + ")" : "Active";
-            System.Windows.Automation.AutomationProperties.SetName(treeView, activeOnly ? "Active chats" :
-                searching ? "Chat search results" : "Codex projects and chats");
-            Text("EmptyHeading", searching && search.Text.Trim() != "" ? "No matching chats" :
-                activeOnly ? "No active chats" : "No local chats yet");
-            Text("EmptyDescription", !flat ? snapshot.Problem : "");
-            Visible("PreviewButton", !flat);
-            Visible("EmptyState", flat ? quickCatalog.Roots.Count == 0 : snapshot.Chats.Count == 0);
+            System.Windows.Automation.AutomationProperties.SetName(treeView, activeOnly ? "Active chats" : "Codex projects and chats");
+            Text("EmptyHeading", activeOnly ? "No active chats" : "No local chats yet");
+            Text("EmptyDescription", activeOnly ? "" : snapshot.Problem);
+            Visible("PreviewButton", !activeOnly);
+            Visible("EmptyState", activeOnly ? activeCatalog.Roots.Count == 0 : snapshot.Chats.Count == 0);
         }
         private void OpenInCodex(string id)
         {

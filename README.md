@@ -20,13 +20,13 @@ The build writes `bin/Orbit E(volved).exe`. For a preview with simulated agents,
 
 ## Using Orbit E(volved)
 
-- **Browse your chats.** Open a project group and choose a chat. Orbit E(volved) includes local archives, groups automatically dated workspaces under **Projectless chats**, and hides setup-only duplicates when a matching chat contains activity. Use **Find** or **Ctrl+F** to search chat titles and project names. The arrow on a chat row opens that conversation in Codex Desktop.
+- **Browse your chats.** Open a project group and choose a chat. Orbit E(volved) includes local archives, groups automatically dated workspaces under **Projectless chats**, and hides setup-only duplicates when a matching chat contains activity. The arrow on a chat row opens that conversation in Codex Desktop.
 - **See active chats.** Select **Active** to see activity across projects, with requests for input at the top. Select a row to open its graph. The status reflects local rollout updates. A previously observed run that goes quiet shows **No recent activity** until another update arrives.
 - **Start with Windows.** In Settings, enable **Start on Startup** to launch this copy when you sign in. The setting is off by default and applies to your Windows account. If you move the executable, turn the setting off and on again from its new location.
 - **Keep an eye on a run.** Use **Collapse** or press **Esc** in the chat list to shrink the widget to a pill. It shows active work and opens the relevant chat when you click it. Right-click the tray icon to show, hide, switch to preview, or quit.
 - **Follow a delegation.** Select **Graph** in a chat to open its workflow. Click a node to inspect it, or use the parent and delegate links to jump between agents. Drag the canvas to pan, use **Ctrl + scroll** to zoom, and use **Fit** to see the whole graph. Click the zoom percentage to return to 100%.
 - **Read the results.** The details view formats public progress and final reports, keeps local file references clickable, and puts routine reads behind **Show file reads**. Select **Files** in a chat or **Files changed** in its graph for recorded successful changes grouped by agent.
-- **Navigate large graphs.** Use **Ctrl+F** or **Find** to jump to an agent, including agents in folded branches. A completed branch can fold into its lead card using **Collapse branch**. A branch with active work stays visible.
+- **Navigate large graphs.** Fold a completed branch into its lead card using **Collapse branch**. Branches with active work stay visible.
 
 ## Session scope
 

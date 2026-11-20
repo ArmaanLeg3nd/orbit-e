@@ -342,13 +342,6 @@ namespace OrbitEvolved
         }
         private static void AppendJson(string path, object record) { File.AppendAllText(path, serializer.Serialize(record) + "\n", new UTF8Encoding(false)); }
         private static void Press(Window window, string name) { var button = (Button)window.FindName(name); button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, button)); }
-        private static void Escape(UIElement element)
-        {
-            var args = new System.Windows.Input.KeyEventArgs(System.Windows.Input.Keyboard.PrimaryDevice,
-                PresentationSource.FromVisual(element), 0, System.Windows.Input.Key.Escape)
-                { RoutedEvent = System.Windows.Input.Keyboard.PreviewKeyDownEvent };
-            element.RaiseEvent(args);
-        }
         private static IEnumerable<TreeNode> Flatten(IEnumerable<TreeNode> nodes)
         {
             foreach (var node in nodes) { yield return node; foreach (var child in Flatten(node.Children)) yield return child; }
@@ -438,13 +431,10 @@ namespace OrbitEvolved
                 try
                 {
                     window.Show(); Pump(500);
-                    Press(window, "FindChatButton");
-                    var search = (TextBox)window.FindName("ChatSearch");
-                    search.Text = "sCheDULE observatory";
                     var tree = (TreeView)window.FindName("AgentTreeView");
-                    Pump(170);
-                    Check(new HashSet<string>(tree.Items.Cast<TreeNode>().Select(row => row.Chat.Id)).SetEquals(new[] { workingId, archivedId }),
-                        "Case-insensitive search combines chat title and project, including archives");
+                    Press(window, "ActiveChatsButton"); Pump(150);
+                    Check(tree.Items.Cast<TreeNode>().Select(row => row.Chat.Id).SequenceEqual(new[] { inputId, workingId, waitingId }),
+                        "The native Active view shows all three chats in priority order");
                     var rowLink = FindVisual<Button>(tree, button => {
                         var chat = button.Tag as ChatSummary;
                         return button.IsVisible && chat != null && chat.Id == workingId && (string)button.CommandParameter == "codex";
@@ -453,15 +443,11 @@ namespace OrbitEvolved
                     rowLink.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, rowLink));
                     Check(opened.Single().AbsoluteUri == "codex://threads/" + workingId,
                         "The chat row launches the exact local Codex deep link");
-                    search.Text = "nothing matches this";
-                    Check(tree.Items.Count == 0 && ((TextBlock)window.FindName("EmptyHeading")).Text == "No matching chats",
-                        "An unmatched search shows an accurate empty state");
-                    Escape(search);
-                    Check(!search.IsVisible && tree.Items.Cast<TreeNode>().All(row => row.Kind == "project"),
-                        "Escape clears chat search and restores the grouped catalog");
+                    Press(window, "AllChatsButton"); Pump(150);
+                    Check(tree.Items.Cast<TreeNode>().All(row => row.Kind == "project") &&
+                          Flatten(tree.Items.Cast<TreeNode>()).Any(row => row.Chat != null && row.Chat.Id == archivedId),
+                        "All restores the project groups and archived chats");
                     Press(window, "ActiveChatsButton"); Pump(150);
-                    Check(tree.Items.Cast<TreeNode>().Select(row => row.Chat.Id).SequenceEqual(new[] { inputId, workingId, waitingId }),
-                        "The native Active view shows all three chats in priority order");
                     Render(window, Path.Combine(root, "qol-active-chats.png"));
                     var target = FindVisual<Button>(tree, button => {
                         var chat = button.Tag as ChatSummary;
@@ -522,19 +508,9 @@ namespace OrbitEvolved
                 Check(graph.NodeCount == 3 && graph.SelectedAgentId == "branch", "A live refresh preserves the folded branch and selection");
                 Render(graph, Path.Combine(root, "qol-collapsed-branch.png"));
 
-                var find = FindVisual<Button>(graph, button => button.Content as string == "Find");
-                find.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, find));
-                var search = FindVisual<TextBox>(graph, field => field.IsVisible);
-                search.Text = "nested REVIEW";
-                var next = FindVisual<Button>(graph, button => button.Content as string == "Next");
-                next.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, next)); Pump(150);
-                Check(graph.NodeCount == 4 && graph.SelectedAgentId == "nested",
-                    "Agent search reveals its folded path and selects the matching agent");
-                Escape(search);
-                Check(graph.IsVisible && !search.IsVisible && graph.SelectedAgentId == "nested",
-                    "Escape closes agent search without closing the graph or losing selection");
-
-                graph.SelectAgent("branch");
+                fold.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, fold));
+                Check(graph.NodeCount == 4 && graph.SelectedAgentId == "branch",
+                    "Expanding a branch restores the nested agents and keeps the lead selected");
                 fold.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, fold));
                 agents[2].State = "working";
                 graph.Update("Quality of life fixture", agents, root);

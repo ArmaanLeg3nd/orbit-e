@@ -106,13 +106,9 @@
           </Grid>
           <Grid Grid.Row="1" Margin="-3,5,-3,5" x:Name="ContentArea">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-            <StackPanel x:Name="CatalogTools" Visibility="Collapsed" Margin="3,0,4,6">
-              <DockPanel LastChildFill="False">
-                <Button x:Name="FindChatButton" DockPanel.Dock="Right" Style="{StaticResource TextButton}" Content="Find" ToolTip="Find chats (Ctrl+F)" AutomationProperties.Name="Find chats"/>
-                <Button x:Name="AllChatsButton" Style="{StaticResource TextButton}" Content="All"/>
-                <Button x:Name="ActiveChatsButton" Style="{StaticResource TextButton}" Content="Active" Margin="4,0,0,0"/>
-              </DockPanel>
-              <TextBox x:Name="ChatSearch" Visibility="Collapsed" Foreground="#F3F3F3" Background="#283038" BorderBrush="#536173" Padding="5" Margin="0,5,0,0" ToolTip="Search chat titles and projects" AutomationProperties.Name="Search chat titles and projects"/>
+            <StackPanel x:Name="CatalogTools" Orientation="Horizontal" Visibility="Collapsed" Margin="3,0,4,6">
+              <Button x:Name="AllChatsButton" Style="{StaticResource TextButton}" Content="All"/>
+              <Button x:Name="ActiveChatsButton" Style="{StaticResource TextButton}" Content="Active" Margin="4,0,0,0"/>
             </StackPanel>
             <TreeView Grid.Row="1" x:Name="AgentTreeView" Foreground="#F3F3F3" Background="Transparent" BorderThickness="0" Padding="0,0,4,0" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" VirtualizingStackPanel.IsVirtualizing="True" VirtualizingStackPanel.VirtualizationMode="Recycling" AutomationProperties.Name="Session, agents, and activity tree"/>
             <StackPanel Grid.Row="1" x:Name="EmptyState" Visibility="Collapsed" VerticalAlignment="Center" Margin="22,0"><TextBlock x:Name="EmptyHeading" Text="No agents yet" FontSize="15" FontWeight="SemiBold"/><TextBlock x:Name="EmptyDescription" Text="Activity will appear here as your team starts working." Foreground="#BDBDBD" FontSize="12" TextWrapping="Wrap" Margin="0,8,0,12"/><Button x:Name="PreviewButton" Content="Preview the widget" Style="{StaticResource TextButton}" Background="#15FFFFFF" HorizontalAlignment="Left"/></StackPanel>

@@ -64,14 +64,10 @@ namespace OrbitEvolved
         private readonly ActivityTextBlock activity;
         private readonly StackPanel history;
         private readonly Button readsToggle;
-        private readonly Button openCodex, findAgent, nextAgent, branchToggle, detailsTab, filesTab;
-        private readonly TextBox agentSearch;
-        private readonly DockPanel searchBar;
-        private readonly TextBlock searchCount;
+        private readonly Button openCodex, branchToggle, detailsTab, filesTab;
         private readonly StackPanel detailBody, filesBody;
         private readonly HashSet<string> foldedBranches = new HashSet<string>(StringComparer.Ordinal);
         private List<Agent> allAgents = new List<Agent>();
-        private List<Agent> searchHits = new List<Agent>();
         private Action openCodexAction;
         private bool showingFiles;
         private string filesFingerprint;
@@ -179,22 +175,9 @@ namespace OrbitEvolved
             };
             PreviewKeyDown += delegate(object sender, KeyEventArgs args)
             {
-                if (args.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control)
-                {
-                    ShowAgentSearch();
-                    args.Handled = true;
-                }
-                else if (args.Key == Key.Escape)
-                {
-                    args.Handled = true;
-                    if (searchBar.Visibility == Visibility.Visible)
-                    {
-                        searchBar.Visibility = Visibility.Collapsed;
-                        agentSearch.Clear();
-                        findAgent.Focus();
-                    }
-                    else CloseFromControl();
-                }
+                if (args.Key != Key.Escape) return;
+                args.Handled = true;
+                CloseFromControl();
             };
 
             var columns = new Grid();
@@ -211,13 +194,9 @@ namespace OrbitEvolved
             DockPanel.SetDock(graphHeader, Dock.Top);
             graphPanel.Children.Add(graphHeader);
             graphHeader.Children.Add(Label("Delegation graph", 13, Primary, FontWeights.SemiBold));
-            findAgent = ViewButton("Find", "Find agents (Ctrl+F)", ShowAgentSearch);
-            DockPanel.SetDock(findAgent, Dock.Right);
-            graphHeader.Children.Add(findAgent);
             graphCount = Label("", 11, Secondary, FontWeights.Normal);
             graphCount.HorizontalAlignment = HorizontalAlignment.Right;
             graphCount.VerticalAlignment = VerticalAlignment.Center;
-            graphCount.Margin = new Thickness(0, 0, 7, 0);
             graphCount.TextTrimming = TextTrimming.CharacterEllipsis;
             graphHeader.Children.Add(graphCount);
 
@@ -240,27 +219,6 @@ namespace OrbitEvolved
             graphWarning.Margin = new Thickness(0, 3, 0, 0);
             graphWarning.TextTrimming = TextTrimming.CharacterEllipsis;
             legend.Children.Add(graphWarning);
-
-            searchBar = new DockPanel { Margin = new Thickness(13, 0, 13, 8), Visibility = Visibility.Collapsed };
-            DockPanel.SetDock(searchBar, Dock.Top);
-            graphPanel.Children.Add(searchBar);
-            nextAgent = ViewButton("Next", "Select the next matching agent", delegate { SelectSearchMatch(1); });
-            DockPanel.SetDock(nextAgent, Dock.Right);
-            searchBar.Children.Add(nextAgent);
-            searchCount = Label("", 11, Muted, FontWeights.Normal);
-            searchCount.Margin = new Thickness(7, 3, 2, 0);
-            DockPanel.SetDock(searchCount, Dock.Right);
-            searchBar.Children.Add(searchCount);
-            agentSearch = new TextBox { Foreground = Primary, Background = Board, BorderBrush = SelectedOutline, Padding = new Thickness(5, 3, 5, 3) };
-            AutomationProperties.SetName(agentSearch, "Search agent names");
-            searchBar.Children.Add(agentSearch);
-            agentSearch.TextChanged += delegate { RefreshAgentSearch(); };
-            agentSearch.PreviewKeyDown += delegate(object sender, KeyEventArgs args)
-            {
-                if (args.Key != Key.Enter) return;
-                SelectSearchMatch((Keyboard.Modifiers & ModifierKeys.Shift) == 0 ? 1 : -1);
-                args.Handled = true;
-            };
 
             var viewport = new Grid { Background = Dots() };
             graphPanel.Children.Add(new Border { BorderBrush = Outline, BorderThickness = new Thickness(0, 1, 0, 1), Child = viewport });
@@ -552,7 +510,6 @@ namespace OrbitEvolved
             foreach (var node in next.Nodes) cards[node.Agent.Id].Refresh(node.Agent);
             SelectAgent(selectedId != null && cards.ContainsKey(selectedId) ? selectedId :
                 layout.Nodes.Count == 0 ? null : layout.Nodes[0].Agent.Id);
-            RefreshAgentSearch();
             if (showingFiles) RefreshFiles();
         }
 
@@ -561,50 +518,6 @@ namespace OrbitEvolved
             return left.Agent.Id == right.Agent.Id && left.ParentId == right.ParentId && left.Issue == right.Issue &&
                 left.Depth == right.Depth && left.Row == right.Row && left.CanCollapse == right.CanCollapse &&
                 left.FoldedCount == right.FoldedCount;
-        }
-
-        private void ShowAgentSearch()
-        {
-            searchBar.Visibility = Visibility.Visible;
-            RefreshAgentSearch();
-            agentSearch.Focus();
-            agentSearch.SelectAll();
-        }
-
-        private void RefreshAgentSearch()
-        {
-            if (searchBar.Visibility != Visibility.Visible) return;
-            var query = agentSearch.Text.Trim();
-            searchHits = query == "" ? new List<Agent>() : allAgents.Where(agent =>
-                agent.DisplayName.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                (agent.Name ?? "").IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0).ToList();
-            searchCount.Text = query == "" ? "" : searchHits.Count == 1 ? "1 match" : searchHits.Count + " matches";
-            nextAgent.IsEnabled = searchHits.Count != 0;
-        }
-
-        private void SelectSearchMatch(int step)
-        {
-            if (searchHits.Count == 0) return;
-            var index = searchHits.FindIndex(agent => agent.Id == selectedId);
-            var next = searchHits[index < 0 ? (step > 0 ? 0 : searchHits.Count - 1) :
-                (index + step + searchHits.Count) % searchHits.Count].Id;
-            if (!cards.ContainsKey(next))
-            {
-                // Keep unrelated branches folded while making this real agent visible.
-                var ordered = allAgents.ToDictionary(agent => agent.Id, StringComparer.Ordinal);
-                var visited = new HashSet<string>(StringComparer.Ordinal);
-                Agent ancestor;
-                for (var id = next; id != null && visited.Add(id) && ordered.TryGetValue(id, out ancestor);
-                    id = ancestor.RecordedParentId ?? ancestor.ParentId)
-                    foldedBranches.Remove(id);
-                RefreshGraph();
-            }
-            SetInspector(false);
-            if (!SelectAgent(next)) return;
-            graphScroll.UpdateLayout();
-            var node = cards[next].Node;
-            graphScroll.ScrollToHorizontalOffset((NodeX(node) + CardWidth / 2) * Zoom - graphScroll.ViewportWidth / 2);
-            graphScroll.ScrollToVerticalOffset((NodeY(node) + CardHeight / 2) * Zoom - graphScroll.ViewportHeight / 2);
         }
 
         private void ToggleSelectedBranch()
