@@ -10,7 +10,7 @@ using System.Text.RegularExpressions;
 using System.Web.Script.Serialization;
 using System.Windows.Media;
 
-namespace Orbit
+namespace OrbitEvolved
 {
     public static class Json
     {
@@ -400,8 +400,8 @@ namespace Orbit
                 }
                 snapshot.Events = snapshot.Agents.SelectMany(a => a.Events).OrderByDescending(e => e.At).Take(100).ToList();
             }
-            catch (IOException) { snapshot.Source = "Reconnecting to local activity"; snapshot.Problem = "Activity is temporarily unavailable. Orbit will retry automatically."; }
-            catch (UnauthorizedAccessException) { snapshot.Source = "Activity folder unavailable"; snapshot.Problem = "Orbit cannot read the activity folder. Check local file permissions."; }
+            catch (IOException) { snapshot.Source = "Reconnecting to local activity"; snapshot.Problem = "Activity is temporarily unavailable. " + Product.Name + " will retry automatically."; }
+            catch (UnauthorizedAccessException) { snapshot.Source = "Activity folder unavailable"; snapshot.Problem = Product.Name + " cannot read the activity folder. Check local file permissions."; }
             return snapshot;
         }
         private void Discover()

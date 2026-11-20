@@ -1,6 +1,6 @@
-# Working on Orbit E
+# Working on Orbit E(volved)
 
-Orbit E is a Windows-native, local-first Codex workflow viewer. Keep the compact widget suitable for a quick glance. Put deeper inspection in the workflow window or the agent details view. [Upstream Orbit by ctx-o1](https://github.com/ctx-o1/subagent-view)
+Orbit E(volved) is a Windows-native, local-first Codex workflow viewer. Keep the compact widget suitable for a quick glance. Put deeper inspection in the workflow window or the agent details view. [Original project by ctx-o1](https://github.com/ctx-o1/subagent-view)
 
 ## Build and verify
 
@@ -14,6 +14,7 @@ Orbit E is a Windows-native, local-first Codex workflow viewer. Keep the compact
 | Area | Files |
 | --- | --- |
 | Session catalog, local and archived discovery, project grouping, duplicate setup records | `src/ChatCatalog.cs` |
+| Per-user Windows startup registration | `src/StartupRegistration.cs` |
 | Incremental rollout parsing, agent state, public activity | `src/Activity.cs` |
 | Compact widget, tray, routing between views | `src/Program.cs`, `src/Widget.xaml`, `src/AgentTree.cs` |
 | Graph geometry, navigation, agent inspector | `src/AgentGraphLayout.cs`, `src/AgentGraphWindow.cs` |

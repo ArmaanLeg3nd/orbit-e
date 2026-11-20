@@ -4,7 +4,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Linq;
 
-namespace Orbit
+namespace OrbitEvolved
 {
     public sealed class TreeNode : INotifyPropertyChanged
     {

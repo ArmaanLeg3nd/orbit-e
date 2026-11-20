@@ -13,7 +13,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 
-namespace Orbit
+namespace OrbitEvolved
 {
     public static class SelfTests
     {
@@ -175,9 +175,20 @@ namespace Orbit
                     "Workflow graph preserves nested delegation and its four real parent edges");
                 using (var signal = new EventWaitHandle(false, EventResetMode.AutoReset))
                 {
-                    var widget = new Widget(new Options(new[] { "--demo", "--workspace", root, "--events", events }), signal);
+                    var startupTestKey = @"Software\Orbit E(volved) self-test " + Guid.NewGuid().ToString("N");
+                    var settings = new Options(new[] { "--demo", "--workspace", root, "--events", events })
+                    {
+                        Startup = new StartupRegistration(startupTestKey)
+                    };
+                    var legacyFolder = Directory.CreateDirectory(Path.Combine(root, Product.LegacyDataDirectory));
+                    var legacyPreferences = Path.Combine(legacyFolder.FullName, "preferences.json");
+                    var legacyData = "{\"attention\":false}";
+                    File.WriteAllText(legacyPreferences, legacyData);
+                    var widget = new Widget(settings, signal);
                     var liveWindow = widget.Window;
                     liveWindow.Show(); Pump(400);
+                    Check(((CheckBox)liveWindow.FindName("AttentionCheck")).IsChecked == false,
+                        "Widget reads preferences from the previous settings directory");
                     var previewGraph = new AgentGraphWindow { Owner = liveWindow };
                     previewGraph.Update("Observatory booking planner", graphData, root);
                     previewGraph.Show(); Pump(60);
@@ -260,6 +271,35 @@ namespace Orbit
                     Render(liveWindow, Path.Combine(root, "detail.png"));
                     Press(liveWindow, "BackButton"); Press(liveWindow, "SettingsButton"); Pump(230);
                     Check(((FrameworkElement)liveWindow.FindName("SettingsView")).Visibility == Visibility.Visible, "Settings open inside the same window");
+                    var attention = (CheckBox)liveWindow.FindName("AttentionCheck");
+                    attention.IsChecked = true;
+                    attention.RaiseEvent(new RoutedEventArgs(CheckBox.ClickEvent, attention));
+                    var preferences = Path.Combine(root, Product.DataDirectory, "preferences.json");
+                    Check((bool)Json.Get(Json.Parse(File.ReadAllText(preferences)), "attention") &&
+                          File.ReadAllText(legacyPreferences) == legacyData,
+                        "Widget saves preferences to the renamed directory and preserves the earlier preferences");
+                    Check(liveWindow.Title.StartsWith(Product.Name + " · ", StringComparison.Ordinal) &&
+                          (string)((Button)liveWindow.FindName("QuitButton")).Content == "Quit " + Product.Name,
+                        "The widget title and quit button use the product name");
+                    try
+                    {
+                        var startup = (CheckBox)liveWindow.FindName("StartupCheck");
+                        Check(startup.IsEnabled && startup.IsChecked == false, "Start on Startup is off without a registration");
+                        startup.IsChecked = true;
+                        startup.RaiseEvent(new RoutedEventArgs(CheckBox.ClickEvent, startup));
+                        string command;
+                        Check(startup.IsChecked == true && settings.Startup.TryRead(out command) &&
+                              command == "\"" + System.Reflection.Assembly.GetEntryAssembly().Location + "\"",
+                            "Enabling startup registers the exact quoted executable path");
+                        Press(liveWindow, "SettingsBackButton");
+                        Press(liveWindow, "SettingsButton");
+                        Check(startup.IsChecked == true, "The startup toggle reloads its registered state from Windows");
+                        startup.IsChecked = false;
+                        startup.RaiseEvent(new RoutedEventArgs(CheckBox.ClickEvent, startup));
+                        Check(startup.IsChecked == false && settings.Startup.TryRead(out command) && command == null,
+                            "Disabling startup removes the registration");
+                    }
+                    finally { Microsoft.Win32.Registry.CurrentUser.DeleteSubKey(startupTestKey, false); }
                     Check(((SolidColorBrush)((Button)liveWindow.FindName("DemoButton")).Background).Color.A > ((SolidColorBrush)((Button)liveWindow.FindName("LiveButton")).Background).Color.A, "Source selection styling matches Preview mode");
                     Render(liveWindow, Path.Combine(root, "settings.png"));
                     Press(liveWindow, "SettingsBackButton");

@@ -17,7 +17,7 @@ using System.Windows.Media.Effects;
 using System.Windows.Shell;
 using Forms = System.Windows.Forms;
 
-namespace Orbit
+namespace OrbitEvolved
 {
     internal sealed class AgentGraphWindow : Window
     {
@@ -90,7 +90,7 @@ namespace Orbit
 
         public AgentGraphWindow()
         {
-            Title = "Agent workflow";
+            Title = Product.Name + " · Agent workflow";
             ShowInTaskbar = false;
             WindowStartupLocation = WindowStartupLocation.Manual;
             WindowStyle = WindowStyle.None;
@@ -468,7 +468,7 @@ namespace Orbit
             this.fallbackWorkspace = fallbackWorkspace ?? "";
             chatHeading.Text = chatTitle ?? "";
             chatHeading.ToolTip = chatHeading.Text;
-            Title = chatHeading.Text == "" ? "Agent workflow" : chatHeading.Text + " \u00b7 Agent workflow";
+            Title = Product.Name + " · " + (chatHeading.Text == "" ? "Agent workflow" : chatHeading.Text);
 
             if (layout == null || ordered.Count != cards.Count || ordered.Any(agent => !cards.ContainsKey(agent.Id) || !cards[agent.Id].MatchesTopology(agent)))
                 ArrangeGraph(AgentGraphLayout.FromOrdered(ordered));

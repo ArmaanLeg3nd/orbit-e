@@ -8,7 +8,7 @@ using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Media;
 
-namespace Orbit
+namespace OrbitEvolved
 {
     internal static class ActivityMarkdown
     {

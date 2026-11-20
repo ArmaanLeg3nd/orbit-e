@@ -18,7 +18,7 @@ using System.Windows.Threading;
 using Forms = System.Windows.Forms;
 using Drawing = System.Drawing;
 
-namespace Orbit
+namespace OrbitEvolved
 {
     public sealed class Options
     {
@@ -30,6 +30,7 @@ namespace Orbit
         public string Session = "";
         public string Events = "";
         public string Sessions;
+        internal StartupRegistration Startup = new StartupRegistration();
         public Options(string[] args)
         {
             var location = new DirectoryInfo(AppDomain.CurrentDomain.BaseDirectory);
@@ -61,8 +62,8 @@ namespace Orbit
                 var options = new Options(args);
                 if (options.Test) return SelfTests.Run();
                 bool created;
-                using (var mutex = new Mutex(true, @"Local\Orbit.AgentWidget", out created))
-                using (var wake = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\Orbit.AgentWidget.Show"))
+                using (var mutex = new Mutex(true, @"Local\OrbitEvolved.AgentWidget", out created))
+                using (var wake = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\OrbitEvolved.AgentWidget.Show"))
                 {
                     if (!created) { wake.Set(); return 0; }
                     var app = new Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
@@ -75,8 +76,8 @@ namespace Orbit
             }
             catch (Exception ex)
             {
-                try { File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "orbit-error.log"), ex.ToString()); } catch (IOException) { }
-                MessageBox.Show("Orbit could not start.\n\n" + ex.Message, "Orbit", MessageBoxButton.OK, MessageBoxImage.Error);
+                try { File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "orbit-evolved-error.log"), ex.ToString()); } catch (IOException) { }
+                MessageBox.Show(Product.Name + " could not start.\n\n" + ex.Message, Product.Name, MessageBoxButton.OK, MessageBoxImage.Error);
                 return 1;
             }
         }
@@ -129,7 +130,7 @@ namespace Orbit
             options = settings; wake = signal; preview = settings.Demo;
             reader = new ActivityReader(options.Workspace, options.Session, options.Events, options.Sessions);
             if (options.AllProjects) catalog = new ChatCatalog(options.CatalogHome, options.Sessions);
-            using (var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("Orbit.Widget.xaml")) Window = (Window)XamlReader.Load(stream);
+            using (var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("OrbitEvolved.Widget.xaml")) Window = (Window)XamlReader.Load(stream);
             LoadPreferences();
             Find<TreeView>("AgentTreeView").ItemsSource = tree.Roots;
             Find<TreeView>("AgentTreeView").AddHandler(Button.ClickEvent, new RoutedEventHandler(delegate(object sender, RoutedEventArgs e)
@@ -166,6 +167,11 @@ namespace Orbit
                 SavePreferences();
             };
             Find<CheckBox>("AttentionCheck").Click += delegate { popAttention = Find<CheckBox>("AttentionCheck").IsChecked == true; SavePreferences(); };
+            Find<CheckBox>("StartupCheck").Click += delegate
+            {
+                var enabled = Find<CheckBox>("StartupCheck").IsChecked == true;
+                RefreshStartupSetting(options.Startup.SetEnabled(enabled));
+            };
             Find<Grid>("DragHeader").MouseLeftButtonDown += HeaderDrag;
             var pill = Find<Button>("ExpandButton");
             pill.PreviewMouseLeftButtonDown += delegate(object sender, MouseButtonEventArgs e) { dragStart = e.GetPosition(Window); dragMoved = false; };
@@ -194,16 +200,16 @@ namespace Orbit
             };
             trayIcon = MakeIcon();
             Window.Icon = Imaging.CreateBitmapSourceFromHIcon(trayIcon.Handle, Int32Rect.Empty, System.Windows.Media.Imaging.BitmapSizeOptions.FromEmptyOptions());
-            tray = new Forms.NotifyIcon { Icon = trayIcon, Text = "Orbit · Agent activity", Visible = true };
+            tray = new Forms.NotifyIcon { Icon = trayIcon, Text = Product.Name + " · Agent activity", Visible = true };
             var menu = new Forms.ContextMenuStrip();
-            menu.Items.Add("Show Orbit", null, delegate { Window.Dispatcher.BeginInvoke(new Action(ShowWidget)); });
+            menu.Items.Add("Show " + Product.Name, null, delegate { Window.Dispatcher.BeginInvoke(new Action(ShowWidget)); });
             menu.Items.Add("Collapse / expand", null, delegate { Window.Dispatcher.BeginInvoke(new Action(delegate { Window.Show(); ToggleCollapsed(); })); });
             menu.Items.Add(new Forms.ToolStripSeparator());
             menu.Items.Add("Live activity", null, delegate { Window.Dispatcher.BeginInvoke(new Action(delegate { SetPreview(false); ShowWidget(); })); });
             menu.Items.Add("Preview animation", null, delegate { Window.Dispatcher.BeginInvoke(new Action(delegate { SetPreview(true); ShowWidget(); })); });
             menu.Items.Add(new Forms.ToolStripSeparator());
             menu.Items.Add("Hide widget", null, delegate { Window.Dispatcher.BeginInvoke(new Action(delegate { Window.Hide(); })); });
-            menu.Items.Add("Quit Orbit", null, delegate { Window.Dispatcher.BeginInvoke(new Action(Quit)); });
+            menu.Items.Add("Quit " + Product.Name, null, delegate { Window.Dispatcher.BeginInvoke(new Action(Quit)); });
             tray.ContextMenuStrip = menu;
             tray.MouseClick += delegate(object sender, Forms.MouseEventArgs e) { if (e.Button == Forms.MouseButtons.Left) Window.Dispatcher.BeginInvoke(new Action(ShowWidget)); };
             timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
@@ -319,7 +325,7 @@ namespace Orbit
                 Text("PillSubtitle", target == null ? snapshot.Project : target.Title);
                 System.Windows.Automation.AutomationProperties.SetName(Find<Button>("ExpandButton"),
                     target == null ? "Open Codex projects" : "Open " + target.Title + ", " + pillTitle);
-                tray.Text = Json.Clean("Orbit · " + pillTitle, 63);
+                tray.Text = Json.Clean(Product.Name + " · " + pillTitle, 63);
                 Text("EmptyHeading", "No local chats yet");
                 Text("EmptyDescription", snapshot.Problem);
                 Visible("EmptyState", snapshot.Chats.Count == 0);
@@ -327,7 +333,7 @@ namespace Orbit
             }
             treeView.ItemsSource = tree.Roots;
             Visible("GraphButton", preview || selectedChat != null || snapshot.Agents.Count > 0);
-            System.Windows.Automation.AutomationProperties.SetName(Find<Button>("ExpandButton"), "Expand Orbit agent activity");
+            System.Windows.Automation.AutomationProperties.SetName(Find<Button>("ExpandButton"), "Expand " + Product.Name + " agent activity");
             System.Windows.Automation.AutomationProperties.SetName(treeView, "Session, agents, and activity tree");
             if (!preview && snapshot.Problem != "" && snapshot.Agents.Count == 0 && agents.Count > 0)
             {
@@ -360,14 +366,14 @@ namespace Orbit
             Text("SourceLabel", snapshot.Source);
             Find<TextBlock>("SourceLabel").ToolTip = snapshot.Problem == "" ? (preview ? "Simulated events for exploring the widget." : "Read-only local activity. No data leaves your computer.") : snapshot.Problem;
             var sessionCount = preview ? 0 : snapshot.TotalSessions;
-            Text("PillSubtitle", preview ? "Preview · simulated activity" : sessionCount > 1 ? sessionCount + " sessions · " + working + " working" : waiting > 0 ? waiting + " waiting · " + done + " done" : done > 0 ? done + " completed · " + snapshot.Project : "Orbit · " + snapshot.Project);
+            Text("PillSubtitle", preview ? "Preview · simulated activity" : sessionCount > 1 ? sessionCount + " sessions · " + working + " working" : waiting > 0 ? waiting + " waiting · " + done + " done" : done > 0 ? done + " completed · " + snapshot.Project : Product.Name + " · " + snapshot.Project);
             Visible("EmptyState", agents.Count == 0);
             Text("EmptyHeading", "No agents yet");
             Text("EmptyDescription", snapshot.Problem != "" ? snapshot.Problem : "Agents will appear as they start working.");
             tree.Update(agents, !String.IsNullOrEmpty(snapshot.FocusedSession) ? snapshot.FocusedSession : snapshot.Session, snapshot.Project);
             if (detailId != null) RefreshDetail();
             if (graph != null && graphChatId == selectedChat) UpdateGraph(snapshot);
-            tray.Text = Json.Clean("Orbit · " + (preview ? "Preview · " : "") + title, 63);
+            tray.Text = Json.Clean(Product.Name + " · " + (preview ? "Preview · " : "") + title, 63);
         }
         private void OpenGraph()
         {
@@ -439,9 +445,25 @@ namespace Orbit
             detailId = null; Visible("ExpandedView", !collapsed); Visible("DetailView", false); Visible("SettingsView", false);
             Find<Button>("SettingsButton").Focus();
         }
+        private void RefreshStartupSetting(string error)
+        {
+            string command;
+            var available = options.Startup.TryRead(out command);
+            var toggle = Find<CheckBox>("StartupCheck");
+            toggle.IsEnabled = available;
+            toggle.IsChecked = available && !String.IsNullOrEmpty(command);
+            var hint = error ?? (!available ? "Windows startup settings are unavailable."
+                : toggle.IsChecked == true && command != options.Startup.Command
+                    ? "Another copy is registered. Turn this off and back on to use this copy."
+                    : "");
+            Text("StartupStatus", hint);
+            Visible("StartupStatus", hint != "");
+        }
+
         private void ShowSettings()
         {
             detailId = null; Visible("ExpandedView", false); Visible("DetailView", false); Visible("SettingsView", true);
+            RefreshStartupSetting(null);
             Find<Button>("SettingsBackButton").Focus(); FadeIn(Find<Grid>("SettingsView"));
         }
         private void CopyActivity()
@@ -542,7 +564,9 @@ namespace Orbit
             gentleMotion = SystemParameters.ClientAreaAnimation;
             try
             {
-                var path = Path.Combine(options.Workspace, ".orbit", "preferences.json");
+                var path = Path.Combine(options.Workspace, Product.DataDirectory, "preferences.json");
+                if (!File.Exists(path))
+                    path = Path.Combine(options.Workspace, Product.LegacyDataDirectory, "preferences.json");
                 if (!File.Exists(path)) return;
                 var prefs = Json.Parse(File.ReadAllText(path));
                 object value;
@@ -559,7 +583,7 @@ namespace Orbit
             StyleSelections();
             try
             {
-                var folder = Path.Combine(options.Workspace, ".orbit"); Directory.CreateDirectory(folder);
+                var folder = Path.Combine(options.Workspace, Product.DataDirectory); Directory.CreateDirectory(folder);
                 File.WriteAllText(Path.Combine(folder, "preferences.json"), new JavaScriptSerializer().Serialize(new { corner = corner, topmost = Window.Topmost, motion = gentleMotion, attention = popAttention }));
             }
             catch (IOException) { }

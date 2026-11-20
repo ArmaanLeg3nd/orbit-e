@@ -1,6 +1,9 @@
 # Changelog
 
-## Orbit E — unreleased
+## Orbit E(volved) — unreleased
+
+- Added an optional Windows sign-in launch setting.
+- Renamed the app, executable, resources, and workspace settings directory for Orbit E(volved).
 
 - Added a catalog of local and archived Codex chats, with project grouping, a projectless section, and setup-only duplicate filtering.
 - Turned the collapsed widget into a live entry point to the active chat.
@@ -8,7 +11,7 @@
 - Added pan, zoom, fit-to-view, and links that jump to related agents.
 - Rendered Markdown reports and clickable local file references in agent details. Routine file reads can be revealed when needed.
 
-## Upstream Orbit history
+## History of the original project
 
 ### Unreleased (`fresh-codex-state`)
 

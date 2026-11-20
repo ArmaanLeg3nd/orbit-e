@@ -6,7 +6,7 @@ param(
     [string]$Message,
     [string]$ParentId,
     [string]$Role = 'builder',
-    [string]$Path = (Join-Path (Split-Path $PSScriptRoot -Parent) '.orbit\activity.jsonl')
+    [string]$Path = (Join-Path (Split-Path $PSScriptRoot -Parent) '.orbit-evolved\activity.jsonl')
 )
 $ErrorActionPreference = 'Stop'
 $eventPath = [IO.Path]::GetFullPath($Path)

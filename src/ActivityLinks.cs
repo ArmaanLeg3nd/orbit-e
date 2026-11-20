@@ -6,7 +6,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
 
-namespace Orbit
+namespace OrbitEvolved
 {
     internal sealed class ActivityFileLink
     {
@@ -116,7 +116,7 @@ namespace Orbit
                         };
                         hyperlink.Click += delegate
                         {
-                            if (!Open(file)) MessageBox.Show("This file could not be opened.\n\n" + file.Reference, "Orbit", MessageBoxButton.OK, MessageBoxImage.Information);
+                            if (!Open(file)) MessageBox.Show("This file could not be opened.\n\n" + file.Reference, Product.Name, MessageBoxButton.OK, MessageBoxImage.Information);
                         };
                         inlines.Add(hyperlink);
                     }
