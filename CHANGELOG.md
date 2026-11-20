@@ -1,11 +1,21 @@
 # Changelog
 
-## Unreleased (`fresh-codex-state`)
+## Orbit E — unreleased
+
+- Added a catalog of local and archived Codex chats, with project grouping, a projectless section, and setup-only duplicate filtering.
+- Turned the collapsed widget into a live entry point to the active chat.
+- Added a centered glass workflow window with live agent status, recorded delegation arrows, a branch highlight, and an inspector for public results.
+- Added pan, zoom, fit-to-view, and links that jump to related agents.
+- Rendered Markdown reports and clickable local file references in agent details. Routine file reads can be revealed when needed.
+
+## Upstream Orbit history
+
+### Unreleased (`fresh-codex-state`)
 
 Session handling, feed honesty, and a bot-card UI pass. Self-tests grew
 from 104 to 113 checks; all green (`.\build.ps1 -Test`).
 
-### Session feed: newest takes focus, nothing hides silently
+#### Session feed: newest takes focus, nothing hides silently
 
 - The view follows the newest active session automatically. When a new
   Codex run appears, it takes focus within one discovery cycle instead of
@@ -29,7 +39,7 @@ from 104 to 113 checks; all green (`.\build.ps1 -Test`).
   retained, session-summary ordering, subdirectory vs prefix-sibling
   scoping.
 
-### Freshness you can read
+#### Freshness you can read
 
 - Footer states: `Synced with local Codex`, `Synced … Xs ago`,
   `last write HH:mm`, `Catching up local Codex…` while a 1 MiB poll
@@ -42,7 +52,7 @@ from 104 to 113 checks; all green (`.\build.ps1 -Test`).
 - Agent tooltips show last-update time, so `Synced` can never be mistaken
   for process liveness.
 
-### Bot cards instead of a file tree
+#### Bot cards instead of a file tree
 
 - Agent rows are the original compact text rows under classic tree chrome
   (expander arrow column plus guide line): path-style name (`/root` for
@@ -65,7 +75,7 @@ from 104 to 113 checks; all green (`.\build.ps1 -Test`).
 - `TreeView` virtualization (recycling) is now explicit; node identity
   still preserves expansion and event rows across live updates.
 
-### Scrollbar that stays slim
+#### Scrollbar that stays slim
 
 - Root cause: `Width=3` without `MinWidth` fell back to the ~17 px
   system minimum. Now a keyed `SlimBar` style (8 px hit area, 3 px
@@ -74,7 +84,7 @@ from 104 to 113 checks; all green (`.\build.ps1 -Test`).
 - Content reserves an 8 px gutter, so the overlay thumb never covers
   text. Detail and settings scrollers inherit the same template.
 
-### Color discipline: status-only
+#### Color discipline: status-only
 
 - One color language everywhere: blue working, amber waiting/attention,
   rose error, muted gray idle/done. Ring, dot, and pill always match.
@@ -85,7 +95,7 @@ from 104 to 113 checks; all green (`.\build.ps1 -Test`).
 - The only motion is the working dot's subtle pulse; idle and done
   stay still and gray.
 
-### Engineering notes
+#### Engineering notes
 
 - `Agent` gained `SessionRoot` (team identity through ancestry
   resolution) and a neutral `AvatarInitial`; `AgentTree` gained

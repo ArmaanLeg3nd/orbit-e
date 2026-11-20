@@ -1,44 +1,42 @@
-# Orbit
+# Orbit E
 
-A small native Windows widget for watching your Codex agents work. Proof of concept: no installer, no account, no network — just build and run.
+Orbit E is a native Windows companion for seeing how Codex agents work together across your chats. It combines a compact desktop widget with a live workflow graph you can open when you want to follow a delegation or read an agent’s result.
 
-```powershell
-.\build.ps1 -Run        # build and watch live Codex activity
-.\build.ps1 -Run -Demo  # build and watch the simulated preview
-.\build.ps1 -Test       # build and run the checks (116, all must pass)
-```
+Orbit E builds on ctx-o1’s Orbit, which supplied the Windows widget, tray controls, and local session reader. This fork adds project-wide chat browsing, formatted activity and file links, and a larger graph for following nested agent work. [Upstream Orbit](https://github.com/ctx-o1/subagent-view)
 
-Requires Windows 10/11 with .NET Framework 4.x (preinstalled). No SDK, no packages. The build drops `bin/Orbit.exe`; double-click it to open.
+![Orbit E workflow window showing a selected branch, its delegates, and the agent details panel](docs/workflow-graph.png)
 
-## Use it
+## Quick start
 
-- It follows the newest Codex session in this project and shows its team: `/root` lead plus subagents, each with its latest activity underneath. Click any row for details.
-- Drag the header to move it (it snaps to corners). Minus or Esc collapses to a pill; click the pill to expand. Ctrl+Q quits.
-- Colors mean status only: blue working, amber waiting/needs-you, rose error, gray idle/done.
-- The footer tells you how fresh the data is (`Synced`, `12s ago`, `Catching up…`). Quiet agents go idle after 5 minutes; silence is never shown as done.
-- Right-click the tray icon for show, hide, live, preview, and quit. Running it twice just reveals the open widget.
+Use Windows 10 or 11 with the built-in 64-bit .NET Framework 4.x runtime and Windows PowerShell. The build uses Windows’ C# compiler and requires no package restore.
 
-## Point it elsewhere
+~~~powershell
+git clone https://github.com/ArmaanLeg3nd/orbit-e.git
+cd orbit-e
+.\build.ps1 -Run
+~~~
 
-```powershell
+The build writes `bin/Orbit.exe`. For a preview with simulated agents, run `.\build.ps1 -Run -Demo`. To run the parser and Windows UI checks, use `.\build.ps1 -Test`.
+
+## Using Orbit E
+
+- **Browse your chats.** Open a project group and choose a chat. Orbit E includes local archives, groups automatically dated workspaces under **Projectless chats**, and hides setup-only duplicates when a matching chat contains activity.
+- **Keep an eye on a run.** Use **Collapse** or press **Esc** in the chat list to shrink the widget to a pill. It shows active work and opens the relevant chat when you click it. Right-click the tray icon to show, hide, switch to preview, or quit.
+- **Follow a delegation.** Select **Graph** in a chat to open its workflow. Click a node to inspect it, or use the parent and delegate links to jump between agents. Drag the canvas to pan, use **Ctrl + scroll** to zoom, and use **Fit** to see the whole graph. Click the zoom percentage to return to 100%.
+- **Read the results.** The details view formats public progress and final reports, keeps local file references clickable, and puts routine reads behind **Show file reads**.
+
+## Session scope
+
+The default view covers all locally recorded Codex chats. Orbit E reads `sessions` and `archived_sessions` under `CODEX_HOME`, which defaults to `%USERPROFILE%\.codex`. It uses local Codex project and title metadata when available. The monitor is read-only, and the data stays on your machine. Visibility depends on Codex writing compatible local rollout files.
+
+~~~powershell
 .\bin\Orbit.exe --workspace 'D:\projects\my-project'
-.\bin\Orbit.exe --workspace 'D:\projects\my-project' --session '<thread-id>'  # pin one session
-.\bin\Orbit.exe --demo                                                        # simulated preview
-```
+.\bin\Orbit.exe --workspace 'D:\projects\my-project' --session '<thread-id>'
+.\bin\Orbit.exe --events 'D:\logs\agent-events.jsonl'
+~~~
 
-Close the widget before relaunching with different flags. Settings live in the workspace's `.orbit/preferences.json`.
+Quit the running instance from the tray before relaunching with different arguments. Widget settings are stored in the workspace’s `.orbit\preferences.json`. For the custom event format, see [the event publisher](scripts/publish-event.ps1).
 
-## Limits (it's a PoC)
+## Development
 
-- Reads local `CODEX_HOME/sessions` rollouts only — an internal Codex format that can change. Cloud-only sessions are invisible. Read-only: it can't start, stop, or approve anything.
-- One widget per desktop; newest session takes focus automatically.
-- Windows only, unsigned dev build, no auto-start. Other agent systems can feed it JSONL via `--events` (see `scripts/publish-event.ps1`).
-
-## Project
-
-- `src/Widget.xaml`: layout and styles.
-- `src/Program.cs`: tray, window behavior, live updates.
-- `src/Activity.cs`: session file tailing and activity parsing.
-- `src/AgentTree.cs`: tree grouping and expansion state.
-- `src/ActivityReaderChecks.cs`, `src/SelfTests.cs`: regression and UI checks.
-- `CHANGELOG.md`: what changed and why. `docs/future.md`: where this could go.
+Start with [the contributor instructions](AGENTS.md) for the source map and checks. Read [project direction](docs/future.md) for the fork’s priorities and [the changelog](CHANGELOG.md) for changes made in the fork and the original project.
