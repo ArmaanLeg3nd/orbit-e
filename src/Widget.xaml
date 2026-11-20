@@ -47,37 +47,44 @@
               </Button.Style>
               <StackPanel Margin="0,0,8,0">
                 <TextBlock Text="{Binding Title}" Foreground="#F4F6FB" FontWeight="SemiBold" FontSize="12" TextTrimming="CharacterEllipsis"/>
-                <TextBlock Text="{Binding Subtitle}" Foreground="#C0C5CE" FontSize="10" Margin="0,2,0,0" TextWrapping="Wrap" MaxHeight="28" TextTrimming="CharacterEllipsis"/>
-                <TextBlock Text="{Binding ReplyLabel}" Foreground="#9BA3B0" FontSize="9" Margin="0,2,0,0">
+                <TextBlock Text="{Binding Subtitle}" Foreground="#C0C5CE" FontSize="11" Margin="0,3,0,0" TextTrimming="CharacterEllipsis">
                   <TextBlock.Style>
                     <Style TargetType="TextBlock">
-                      <Setter Property="Visibility" Value="Visible"/>
-                      <Style.Triggers><DataTrigger Binding="{Binding HasReplies}" Value="False"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers>
+                      <Style.Triggers>
+                        <DataTrigger Binding="{Binding Subtitle}" Value=""><Setter Property="Visibility" Value="Collapsed"/></DataTrigger>
+                      </Style.Triggers>
                     </Style>
                   </TextBlock.Style>
                 </TextBlock>
               </StackPanel>
             </Button>
-            <StackPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Top">
-              <TextBlock Text="{Binding Status}" Foreground="{Binding StatusBrush}" FontSize="11" HorizontalAlignment="Right"/>
-              <TextBlock Text="{Binding Elapsed}" Foreground="#9BA3B0" FontFamily="Consolas" FontSize="10" Margin="0,3,0,0" HorizontalAlignment="Right"/>
-            </StackPanel>
+            <TextBlock Grid.Column="1" Text="{Binding Status}" Foreground="{Binding StatusBrush}" FontSize="11" VerticalAlignment="Top"/>
           </Grid>
         </Grid>
         <Grid x:Name="GroupHeader" Visibility="Collapsed" Margin="4,10,4,4"><TextBlock Text="{Binding Title}" FontSize="11" Foreground="#8E96A3" HorizontalAlignment="Center"/></Grid>
-        <Grid x:Name="EventHeader" Visibility="Collapsed" Margin="2,5,3,5">
-          <Grid.ColumnDefinitions><ColumnDefinition Width="10"/><ColumnDefinition Width="*"/><ColumnDefinition Width="52"/></Grid.ColumnDefinitions>
-          <Ellipse Width="6" Height="6" Fill="{Binding Activity.Brush}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="0,4,0,0"/>
-          <TextBlock Grid.Column="1" Text="{Binding Title}" TextWrapping="Wrap" MaxHeight="40" TextTrimming="CharacterEllipsis" FontSize="10" Foreground="#D6DBE3" Margin="2,0,6,0"/>
-          <TextBlock Grid.Column="2" Text="{Binding Elapsed}" Foreground="#7E868F" FontFamily="Consolas" FontSize="9" Margin="0,2,0,0" HorizontalAlignment="Right"/>
+        <Grid x:Name="ProjectHeader" Visibility="Collapsed" Margin="3,7,5,7">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <TextBlock Text="{Binding Title}" Foreground="#F4F6FB" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+          <TextBlock Grid.Column="1" Text="{Binding Description}" Foreground="#9BA3B0" FontSize="10" Margin="7,0,0,0" VerticalAlignment="Center"/>
         </Grid>
+        <Button x:Name="ChatHeader" Visibility="Collapsed" Style="{StaticResource TextButton}" Tag="{Binding Chat}" AutomationProperties.Name="{Binding Title}" Height="Auto" HorizontalContentAlignment="Stretch" Padding="5,5" Margin="-3,1,4,1">
+          <StackPanel>
+            <TextBlock Text="{Binding Title}" Foreground="#F4F6FB" FontSize="12" TextTrimming="CharacterEllipsis"/>
+            <TextBlock Text="{Binding Description}" Foreground="#9BA3B0" FontSize="10" Margin="0,3,0,0"/>
+          </StackPanel>
+        </Button>
       </Grid>
       <HierarchicalDataTemplate.Triggers>
         <DataTrigger Binding="{Binding Kind}" Value="session"><Setter TargetName="AgentHeader" Property="Visibility" Value="Collapsed"/><Setter TargetName="GroupHeader" Property="Visibility" Value="Visible"/></DataTrigger>
-        <DataTrigger Binding="{Binding Kind}" Value="event"><Setter TargetName="AgentHeader" Property="Visibility" Value="Collapsed"/><Setter TargetName="EventHeader" Property="Visibility" Value="Visible"/></DataTrigger>
+        <DataTrigger Binding="{Binding Kind}" Value="project"><Setter TargetName="AgentHeader" Property="Visibility" Value="Collapsed"/><Setter TargetName="ProjectHeader" Property="Visibility" Value="Visible"/></DataTrigger>
+        <DataTrigger Binding="{Binding Kind}" Value="chat"><Setter TargetName="AgentHeader" Property="Visibility" Value="Collapsed"/><Setter TargetName="ChatHeader" Property="Visibility" Value="Visible"/></DataTrigger>
       </HierarchicalDataTemplate.Triggers>
     </HierarchicalDataTemplate>
-    <DataTemplate x:Key="EventTemplate"><Grid Margin="0,6"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="40"/></Grid.ColumnDefinitions><TextBlock Text="{Binding Text}" TextWrapping="Wrap" FontSize="12" Foreground="#D0D0D0" Margin="0,0,9,0"/><TextBlock Grid.Column="1" Text="{Binding TimeLabel}" Foreground="#A0A0A0" FontFamily="Consolas" FontSize="10" HorizontalAlignment="Right"/></Grid></DataTemplate>
+    <DataTemplate x:Key="EventTemplate">
+      <Border BorderThickness="0,0,0,1" BorderBrush="#18FFFFFF" Padding="0,8,7,8">
+        <local:ActivityTextBlock Body="{Binding Body}" Workspace="{Binding Tag, RelativeSource={RelativeSource AncestorType=ItemsControl}}" TextWrapping="Wrap" FontSize="12" Foreground="#D0D0D0"/>
+      </Border>
+    </DataTemplate>
   </Window.Resources>
   <Grid Margin="12" x:Name="Root">
     <Border x:Name="Surface" CornerRadius="15" BorderThickness="1">
@@ -94,16 +101,41 @@
           </Grid>
           <Grid Grid.Row="1" Margin="-3,5,-3,5" x:Name="ContentArea">
             <TreeView x:Name="AgentTreeView" Foreground="#F3F3F3" Background="Transparent" BorderThickness="0" Padding="0,0,4,0" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" VirtualizingStackPanel.IsVirtualizing="True" VirtualizingStackPanel.VirtualizationMode="Recycling" AutomationProperties.Name="Session, agents, and activity tree"/>
-            <StackPanel x:Name="EmptyState" Visibility="Collapsed" VerticalAlignment="Center" Margin="22,0"><TextBlock Text="No agents yet" FontSize="15" FontWeight="SemiBold"/><TextBlock x:Name="EmptyDescription" Text="Activity will appear here as your team starts working." Foreground="#BDBDBD" FontSize="12" TextWrapping="Wrap" Margin="0,8,0,12"/><Button x:Name="PreviewButton" Content="Preview the widget" Style="{StaticResource TextButton}" Background="#15FFFFFF" HorizontalAlignment="Left"/></StackPanel>
+            <StackPanel x:Name="EmptyState" Visibility="Collapsed" VerticalAlignment="Center" Margin="22,0"><TextBlock x:Name="EmptyHeading" Text="No agents yet" FontSize="15" FontWeight="SemiBold"/><TextBlock x:Name="EmptyDescription" Text="Activity will appear here as your team starts working." Foreground="#BDBDBD" FontSize="12" TextWrapping="Wrap" Margin="0,8,0,12"/><Button x:Name="PreviewButton" Content="Preview the widget" Style="{StaticResource TextButton}" Background="#15FFFFFF" HorizontalAlignment="Left"/></StackPanel>
           </Grid>
-          <Grid Grid.Row="2" x:Name="Footer"><Border BorderBrush="#22FFFFFF" BorderThickness="0,1,0,0"/><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock x:Name="SourceLabel" Text="Local activity" Foreground="#B0B0B0" FontSize="10" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="1,0,6,0"/><Button x:Name="SourceButton" Grid.Column="1" Content="Codex" Style="{StaticResource TextButton}" FontSize="10" Height="25"/></Grid></Grid>
+          <Grid Grid.Row="2" x:Name="Footer">
+            <Border BorderBrush="#22FFFFFF" BorderThickness="0,1,0,0"/>
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <TextBlock x:Name="SourceLabel" Text="Local activity" Foreground="#B0B0B0" FontSize="10" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="1,0,6,0"/>
+              <Button x:Name="GraphButton" Grid.Column="1" Content="Graph" Style="{StaticResource TextButton}" FontSize="10" Height="25" Visibility="Collapsed" ToolTip="Open the agent workflow graph" AutomationProperties.Name="Open agent workflow graph"/>
+              <Button x:Name="SourceButton" Grid.Column="2" Content="Codex" Style="{StaticResource TextButton}" FontSize="10" Height="25"/>
+            </Grid>
+          </Grid>
         </Grid>
         <Grid x:Name="DetailView" Visibility="Collapsed" Margin="14,9">
           <Grid.RowDefinitions><RowDefinition Height="30"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="28"/></Grid.RowDefinitions>
           <Button x:Name="BackButton" Content="←  Agent tree" Style="{StaticResource TextButton}" HorizontalAlignment="Left" Margin="-8,0,0,0"/>
-          <StackPanel Grid.Row="1" Margin="0,11,0,10"><TextBlock x:Name="DetailName" FontSize="19" FontWeight="SemiBold" TextWrapping="Wrap"/><StackPanel Orientation="Horizontal" Margin="0,6,0,10"><TextBlock x:Name="DetailStatus" FontSize="11"/><TextBlock x:Name="DetailElapsed" Foreground="#AAAAAA" FontFamily="Consolas" FontSize="11" Margin="10,0,0,0"/></StackPanel><TextBlock x:Name="DetailTask" Foreground="#D0D0D0" TextWrapping="Wrap" FontSize="12" MaxHeight="65" TextTrimming="CharacterEllipsis"/><TextBlock x:Name="DetailParent" Foreground="#AFAFAF" FontSize="10" Margin="0,9,0,0"/><Border Background="#28FFFFFF" Height="1" Margin="0,12,0,9"/><TextBlock Text="Activity" FontSize="11" Foreground="#B3B3B3"/></StackPanel>
-          <ScrollViewer Grid.Row="2"><ItemsControl x:Name="DetailEvents" ItemTemplate="{StaticResource EventTemplate}"/></ScrollViewer>
-          <Button Grid.Row="3" x:Name="CopyButton" Content="Copy activity" Style="{StaticResource TextButton}" HorizontalAlignment="Left" Margin="-8,0,0,0" FontSize="11"/>
+          <StackPanel Grid.Row="1" Margin="0,12,0,8">
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <TextBlock x:Name="DetailName" FontSize="19" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,10,0"/>
+              <TextBlock Grid.Column="1" x:Name="DetailStatus" FontSize="11" VerticalAlignment="Center"/>
+            </Grid>
+          </StackPanel>
+          <ScrollViewer Grid.Row="2" x:Name="DetailScroll" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+              <local:ActivityTextBlock x:Name="DetailTask" Foreground="#D0D0D0" TextWrapping="Wrap" FontSize="12" Margin="0,0,7,7"/>
+              <StackPanel x:Name="DetailHistory" Margin="0,6,0,0">
+                <TextBlock Text="Earlier activity" FontSize="11" Foreground="#B3B3B3" Margin="0,0,0,2"/>
+                <ItemsControl x:Name="DetailEvents" ItemTemplate="{StaticResource EventTemplate}"/>
+              </StackPanel>
+            </StackPanel>
+          </ScrollViewer>
+          <Grid Grid.Row="3">
+            <Button x:Name="CopyButton" Content="Copy activity" Style="{StaticResource TextButton}" HorizontalAlignment="Left" Margin="-8,0,0,0" FontSize="11"/>
+            <Button x:Name="ToggleReadsButton" Content="Show file reads" Style="{StaticResource TextButton}" HorizontalAlignment="Right" Margin="0,0,-8,0" FontSize="11" Visibility="Collapsed"/>
+          </Grid>
         </Grid>
         <Grid x:Name="SettingsView" Visibility="Collapsed" Margin="14,9">
           <Grid.RowDefinitions><RowDefinition Height="30"/><RowDefinition Height="*"/><RowDefinition Height="28"/></Grid.RowDefinitions>
@@ -118,7 +150,7 @@
           <Button Grid.Row="2" x:Name="QuitButton" Content="Quit Orbit" Style="{StaticResource TextButton}" FontSize="11" HorizontalAlignment="Right"/>
         </Grid>
         <Grid x:Name="PillView" Visibility="Collapsed" Margin="10,0">
-          <Button x:Name="ExpandButton" Background="Transparent" Style="{StaticResource TextButton}" Height="Auto" HorizontalContentAlignment="Stretch" Padding="1,0" AutomationProperties.Name="Expand Orbit agent activity"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="16"/></Grid.ColumnDefinitions><StackPanel VerticalAlignment="Center"><TextBlock x:Name="PillTitle" Text="Agents working" FontSize="12" FontWeight="SemiBold"/><TextBlock x:Name="PillSubtitle" Text="Orbit" FontSize="10" Foreground="#B8B8B8" Margin="0,2,0,0"/></StackPanel><TextBlock Grid.Column="1" Text="↗" Foreground="#CCCCCC" FontSize="14" VerticalAlignment="Center"/></Grid></Button>
+          <Button x:Name="ExpandButton" Background="Transparent" Style="{StaticResource TextButton}" Height="Auto" HorizontalContentAlignment="Stretch" Padding="1,0" AutomationProperties.Name="Expand Orbit agent activity"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="16"/></Grid.ColumnDefinitions><StackPanel VerticalAlignment="Center"><TextBlock x:Name="PillTitle" Text="Agents working" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock x:Name="PillSubtitle" Text="Orbit" FontSize="10" Foreground="#B8B8B8" Margin="0,2,0,0" TextTrimming="CharacterEllipsis"/></StackPanel><TextBlock Grid.Column="1" Text="↗" Foreground="#CCCCCC" FontSize="14" VerticalAlignment="Center"/></Grid></Button>
         </Grid>
       </Grid>
     </Border>

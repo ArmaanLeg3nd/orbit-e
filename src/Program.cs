@@ -24,7 +24,9 @@ namespace Orbit
     {
         public bool Demo;
         public bool Test;
+        public bool AllProjects;
         public string Workspace;
+        internal string CatalogHome = ActivityReader.CodexHome();
         public string Session = "";
         public string Events = "";
         public string Sessions;
@@ -32,17 +34,21 @@ namespace Orbit
         {
             var location = new DirectoryInfo(AppDomain.CurrentDomain.BaseDirectory);
             Workspace = location.Name == "bin" ? location.Parent.FullName : location.FullName;
+            var workspaceSelected = false;
+            var allProjectsRequested = false;
             for (int i = 0; i < args.Length; i++)
             {
                 if (args[i] == "--demo") Demo = true;
                 else if (args[i] == "--live") Demo = false;
+                else if (args[i] == "--all-projects") allProjectsRequested = true;
                 else if (args[i] == "--self-test") Test = true;
-                else if (args[i] == "--workspace" && i + 1 < args.Length) Workspace = Path.GetFullPath(args[++i]);
+                else if (args[i] == "--workspace" && i + 1 < args.Length) { Workspace = Path.GetFullPath(args[++i]); workspaceSelected = true; }
                 else if (args[i] == "--session" && i + 1 < args.Length) Session = args[++i];
                 else if (args[i] == "--events" && i + 1 < args.Length) Events = Path.GetFullPath(args[++i]);
                 else if (args[i] == "--sessions-dir" && i + 1 < args.Length) Sessions = Path.GetFullPath(args[++i]);
                 else throw new ArgumentException("Unknown or incomplete argument: " + args[i]);
             }
+            AllProjects = Session == "" && Events == "" && (allProjectsRequested || !workspaceSelected);
         }
     }
     public static class Program
@@ -82,9 +88,16 @@ namespace Orbit
         private readonly Options options;
         private readonly EventWaitHandle wake;
         private readonly ActivityReader reader;
+        private readonly ChatCatalog catalog;
         private readonly DemoFeed demo = new DemoFeed();
         private readonly ObservableCollection<Agent> agents = new ObservableCollection<Agent>();
         private readonly AgentTree tree = new AgentTree();
+        private readonly AgentTree catalogTree = new AgentTree();
+        private List<ChatSummary> displayedCatalog;
+        private string selectedChat;
+        private AgentGraphWindow graph;
+        private string graphChatId;
+        private Snapshot graphSnapshot;
         private readonly DispatcherTimer timer;
         private readonly Forms.NotifyIcon tray;
         private readonly Drawing.Icon trayIcon;
@@ -101,6 +114,7 @@ namespace Orbit
         private int tick;
         private int generation;
         private string detailId;
+        private bool showFileReads;
         private readonly HashSet<string> attentionSeen = new HashSet<string>();
         private Point dragStart;
         private bool dragMoved;
@@ -114,6 +128,7 @@ namespace Orbit
         {
             options = settings; wake = signal; preview = settings.Demo;
             reader = new ActivityReader(options.Workspace, options.Session, options.Events, options.Sessions);
+            if (options.AllProjects) catalog = new ChatCatalog(options.CatalogHome, options.Sessions);
             using (var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("Orbit.Widget.xaml")) Window = (Window)XamlReader.Load(stream);
             LoadPreferences();
             Find<TreeView>("AgentTreeView").ItemsSource = tree.Roots;
@@ -121,17 +136,20 @@ namespace Orbit
             {
                 var button = e.OriginalSource as Button;
                 if (button != null && button.Tag is Agent) OpenDetail(((Agent)button.Tag).Id);
+                if (button != null && button.Tag is ChatSummary) SelectChat(((ChatSummary)button.Tag).Id);
             }));
             Click("CollapseButton", ToggleCollapsed);
-            Click("ExpandButton", delegate { if (!dragMoved) RequestExpand(); });
+            Click("ExpandButton", delegate { if (!dragMoved) OpenFromPill(); });
             Click("SettingsButton", ShowSettings);
-            Click("SourceButton", delegate { if (preview) SetPreview(false); else ShowSettings(); });
+            Click("SourceButton", delegate { if (preview) SetPreview(false); else if (selectedChat != null) SelectChat(null); else ShowSettings(); });
+            Click("GraphButton", OpenGraph);
             Click("SettingsBackButton", Back);
             Click("BackButton", Back);
             Click("PreviewButton", delegate { SetPreview(true); Back(); });
             Click("LiveButton", delegate { SetPreview(false); Back(); });
             Click("DemoButton", delegate { SetPreview(true); Back(); });
             Click("CopyButton", CopyActivity);
+            Click("ToggleReadsButton", delegate { showFileReads = !showFileReads; RefreshDetail(); });
             Click("QuitButton", Quit);
             Click("TopLeftButton", delegate { corner = 0; PlaceCorner(); SavePreferences(); });
             Click("TopRightButton", delegate { corner = 1; PlaceCorner(); SavePreferences(); });
@@ -141,7 +159,12 @@ namespace Orbit
             Find<CheckBox>("MotionCheck").IsChecked = gentleMotion;
             Find<CheckBox>("AttentionCheck").IsChecked = popAttention;
             Find<CheckBox>("TopmostCheck").Click += delegate { Window.Topmost = Find<CheckBox>("TopmostCheck").IsChecked == true; SavePreferences(); };
-            Find<CheckBox>("MotionCheck").Click += delegate { gentleMotion = Find<CheckBox>("MotionCheck").IsChecked == true; SavePreferences(); };
+            Find<CheckBox>("MotionCheck").Click += delegate
+            {
+                gentleMotion = Find<CheckBox>("MotionCheck").IsChecked == true;
+                if (graph != null) graph.GentleMotion = gentleMotion;
+                SavePreferences();
+            };
             Find<CheckBox>("AttentionCheck").Click += delegate { popAttention = Find<CheckBox>("AttentionCheck").IsChecked == true; SavePreferences(); };
             Find<Grid>("DragHeader").MouseLeftButtonDown += HeaderDrag;
             var pill = Find<Button>("ExpandButton");
@@ -158,7 +181,7 @@ namespace Orbit
             Window.KeyDown += delegate(object sender, KeyEventArgs e)
             {
                 if (e.Key == Key.Escape) { if (Find<Grid>("SettingsView").Visibility == Visibility.Visible || detailId != null) Back(); else if (!collapsed) ToggleCollapsed(); e.Handled = true; }
-                else if ((e.Key == Key.Enter || e.Key == Key.Space) && collapsed) { ToggleCollapsed(); e.Handled = true; }
+                else if ((e.Key == Key.Enter || e.Key == Key.Space) && collapsed) { OpenFromPill(); e.Handled = true; }
                 else if (e.Key == Key.Q && Keyboard.Modifiers == ModifierKeys.Control) { Quit(); e.Handled = true; }
             };
             Window.Closing += delegate { closing = true; timer.Stop(); tray.Visible = false; tray.Dispose(); trayIcon.Dispose(); };
@@ -188,18 +211,18 @@ namespace Orbit
             {
                 if (wake.WaitOne(0)) ShowWidget();
                 tick++;
-                if (tick % 2 == 0) { foreach (var agent in agents) agent.Notify(); tree.Refresh(); if (detailId != null) RefreshDetail(); }
                 if (tick % 3 == 0) Poll();
             };
             timer.Start();
             SetModeLabels();
             StyleSelections();
+            Poll();
         }
         private void SetModeLabels()
         {
-            Find<Button>("SourceButton").Content = preview ? "Go live" : String.IsNullOrEmpty(options.Events) ? "Codex" : "File";
+            Find<Button>("SourceButton").Content = preview ? "Go live" : selectedChat != null ? "← Projects" : String.IsNullOrEmpty(options.Events) ? "Codex" : "File";
             Find<Button>("LiveButton").Content = String.IsNullOrEmpty(options.Events) ? "Live · Codex" : "Live · File";
-            Text("SettingsSource", preview ? "Simulated agents. Choose Live for your workspace." : "Read-only activity from local sessions.");
+            Text("SettingsSource", preview ? "Simulated agent activity." : "Read-only activity from local sessions.");
             StyleSelections();
         }
         private void StyleSelections()
@@ -211,8 +234,20 @@ namespace Orbit
         }
         private void SetPreview(bool enabled)
         {
-            preview = enabled; generation++; detailId = null; attentionSeen.Clear(); agents.Clear(); tree.Clear();
+            if (preview != enabled && graph != null) graph.Close();
+            preview = enabled; selectedChat = null; generation++; detailId = null; attentionSeen.Clear(); agents.Clear(); tree.Clear();
             SetModeLabels(); Poll();
+        }
+        private void SelectChat(string id)
+        {
+            selectedChat = id; generation++; detailId = null; attentionSeen.Clear(); agents.Clear(); tree.Clear();
+            Find<TreeView>("AgentTreeView").ItemsSource = id == null ? catalogTree.Roots : tree.Roots;
+            Visible("GraphButton", false);
+            Visible("EmptyState", false);
+            Text("SummaryTitle", "Loading…");
+            Text("SourceLabel", "Reading local activity…");
+            SetModeLabels();
+            Poll();
         }
         private void Poll()
         {
@@ -221,7 +256,14 @@ namespace Orbit
             if (polling) return;
             polling = true;
             int version = generation;
-            Task.Factory.StartNew(delegate { return reader.Poll(); }).ContinueWith(task =>
+            var chat = selectedChat;
+            var graphChat = graphChatId;
+            Task.Factory.StartNew(delegate
+            {
+                var main = catalog == null ? reader.Poll() : catalog.Poll(chat, graphChat);
+                var extra = catalog != null && graphChat != null && graphChat != chat ? catalog.Poll(graphChat) : null;
+                return Tuple.Create(main, extra);
+            }).ContinueWith(task =>
             {
                 if (closing || Window.Dispatcher.HasShutdownStarted) { var observed = task.Exception; return; }
                 Window.Dispatcher.BeginInvoke(new Action(delegate
@@ -233,14 +275,60 @@ namespace Orbit
                         var observed = task.Exception;
                         foreach (var agent in agents) { agent.State = "idle"; agent.Task = "Activity unavailable · retrying"; agent.Ended = agent.Updated; agent.Notify(); }
                         Text("SourceLabel", "Activity unavailable · retrying"); Text("SummaryTitle", "Reconnecting"); Text("PillTitle", "Activity unavailable"); tree.Refresh();
+                        if (detailId != null) RefreshDetail();
+                        if (graph != null && graphChatId == graphChat) ShowGraphUnavailable(false);
                     }
-                    else Apply(task.Result);
+                    else
+                    {
+                        Apply(task.Result.Item1);
+                        if (graph != null && graphChatId == graphChat)
+                        {
+                            if (task.Result.Item2 != null) UpdateGraph(task.Result.Item2);
+                            else if (chat != null && graphChat == chat && task.Result.Item1.Chats != null)
+                                ShowGraphUnavailable(true);
+                        }
+                    }
                 }));
             });
         }
         private void Apply(Snapshot snapshot)
         {
             current = snapshot;
+            var treeView = Find<TreeView>("AgentTreeView");
+            if (snapshot.Chats != null)
+            {
+                Visible("GraphButton", false);
+                if (selectedChat != null) { selectedChat = null; SetModeLabels(); }
+                if (!Object.ReferenceEquals(displayedCatalog, snapshot.Chats))
+                {
+                    catalogTree.UpdateCatalog(snapshot.Chats);
+                    displayedCatalog = snapshot.Chats;
+                }
+                treeView.ItemsSource = catalogTree.Roots;
+                System.Windows.Automation.AutomationProperties.SetName(treeView, "Codex projects and chats");
+                Text("ProjectLabel", snapshot.Project);
+                Text("SummaryTitle", snapshot.ActiveChats > 0
+                    ? snapshot.ActiveChats + (snapshot.ActiveChats == 1 ? " active chat" : " active chats")
+                    : catalogTree.Roots.Count == 1 ? "1 project group" : catalogTree.Roots.Count + " project groups");
+                Text("SourceLabel", snapshot.Source);
+                var target = snapshot.ActiveChat;
+                var pillTitle = target == null ? "No active chats" : snapshot.ActiveChatStatus;
+                if (target != null && snapshot.ActiveChatStatus == "Working")
+                    pillTitle = snapshot.WorkingAgents == 1 ? "1 agent working" : snapshot.WorkingAgents + " agents working";
+                Text("PillTitle", pillTitle);
+                Text("PillSubtitle", target == null ? snapshot.Project : target.Title);
+                System.Windows.Automation.AutomationProperties.SetName(Find<Button>("ExpandButton"),
+                    target == null ? "Open Codex projects" : "Open " + target.Title + ", " + pillTitle);
+                tray.Text = Json.Clean("Orbit · " + pillTitle, 63);
+                Text("EmptyHeading", "No local chats yet");
+                Text("EmptyDescription", snapshot.Problem);
+                Visible("EmptyState", snapshot.Chats.Count == 0);
+                return;
+            }
+            treeView.ItemsSource = tree.Roots;
+            Visible("GraphButton", preview || selectedChat != null || snapshot.Agents.Count > 0);
+            System.Windows.Automation.AutomationProperties.SetName(Find<Button>("ExpandButton"), "Expand Orbit agent activity");
+            System.Windows.Automation.AutomationProperties.SetName(treeView, "Session, agents, and activity tree");
             if (!preview && snapshot.Problem != "" && snapshot.Agents.Count == 0 && agents.Count > 0)
             {
                 // Do not present stale records as still working after a read failure.
@@ -274,14 +362,49 @@ namespace Orbit
             var sessionCount = preview ? 0 : snapshot.TotalSessions;
             Text("PillSubtitle", preview ? "Preview · simulated activity" : sessionCount > 1 ? sessionCount + " sessions · " + working + " working" : waiting > 0 ? waiting + " waiting · " + done + " done" : done > 0 ? done + " completed · " + snapshot.Project : "Orbit · " + snapshot.Project);
             Visible("EmptyState", agents.Count == 0);
+            Text("EmptyHeading", "No agents yet");
             Text("EmptyDescription", snapshot.Problem != "" ? snapshot.Problem : "Agents will appear as they start working.");
             tree.Update(agents, !String.IsNullOrEmpty(snapshot.FocusedSession) ? snapshot.FocusedSession : snapshot.Session, snapshot.Project);
             if (detailId != null) RefreshDetail();
+            if (graph != null && graphChatId == selectedChat) UpdateGraph(snapshot);
             tray.Text = Json.Clean("Orbit · " + (preview ? "Preview · " : "") + title, 63);
+        }
+        private void OpenGraph()
+        {
+            if (current.Chats != null) return;
+            if (graph != null && graphChatId != selectedChat) graph.Close();
+            if (graph == null)
+            {
+                graph = new AgentGraphWindow { Owner = Window, GentleMotion = gentleMotion };
+                graph.Closed += delegate { graph = null; graphChatId = null; graphSnapshot = null; };
+            }
+            graphChatId = selectedChat;
+            UpdateGraph(current);
+            if (!graph.IsVisible) graph.Show();
+            if (graph.WindowState == WindowState.Minimized) graph.WindowState = WindowState.Normal;
+            graph.Activate();
+        }
+        private void UpdateGraph(Snapshot snapshot)
+        {
+            if (snapshot.Chats != null) { ShowGraphUnavailable(true); return; }
+            if (!snapshot.Connected && snapshot.Problem != "" && graphSnapshot != null) { ShowGraphUnavailable(false); return; }
+            graphSnapshot = snapshot;
+            var title = snapshot.Project;
+            if (snapshot.Problem != "") title = "Some activity unavailable · " + title;
+            else if (snapshot.CatchingUp) title = "Catching up · " + title;
+            graph.Update(title, snapshot.Agents, options.Workspace);
+        }
+        private void ShowGraphUnavailable(bool removed)
+        {
+            if (graphSnapshot == null) return;
+            var title = (removed ? "Chat unavailable · " : "Reconnecting · ") + graphSnapshot.Project;
+            graph.Update(title, removed ? Enumerable.Empty<Agent>() : graphSnapshot.Agents, options.Workspace);
         }
         private void OpenDetail(string id)
         {
             Find<Button>("CopyButton").Content = "Copy activity";
+            showFileReads = false;
+            Find<ScrollViewer>("DetailScroll").ScrollToTop();
             detailId = id; Visible("ExpandedView", false); Visible("SettingsView", false); Visible("DetailView", true); RefreshDetail();
             Find<Button>("BackButton").Focus(); FadeIn(Find<Grid>("DetailView"));
         }
@@ -289,11 +412,27 @@ namespace Orbit
         {
             var agent = agents.FirstOrDefault(a => a.Id == detailId);
             if (agent == null) { Back(); return; }
-            Text("DetailName", agent.DisplayName); Text("DetailStatus", agent.StatusLabel); Text("DetailElapsed", agent.Elapsed); Text("DetailTask", agent.Task);
+            var summary = agent.ActivitySummary;
+            Text("DetailName", agent.DisplayName);
+            Text("DetailStatus", agent.StatusLabel);
+            var workspace = String.IsNullOrEmpty(agent.Workspace) ? options.Workspace : agent.Workspace;
+            var task = Find<ActivityTextBlock>("DetailTask");
+            task.Workspace = workspace;
+            task.Body = agent.ActivityDetail;
             Find<TextBlock>("DetailStatus").Foreground = agent.AccentBrush;
-            var parent = agents.FirstOrDefault(a => a.Id == agent.ParentId);
-            Text("DetailParent", agent.IsRoot ? "Coordinating this workspace" : parent != null ? "Spawned by " + parent.Name : String.IsNullOrEmpty(agent.ParentId) ? "Team agent" : "Parent · " + Json.Clean(agent.ParentId, 34));
-            Find<ItemsControl>("DetailEvents").ItemsSource = agent.Events.OrderByDescending(e => e.At).ToList();
+            var events = agent.Events.Where(entry => !entry.IsLifecycle).OrderByDescending(entry => entry.At).ToList();
+            var currentEvent = events.FindIndex(entry => entry.Text == summary || Json.Clean(entry.Text, 180) == summary);
+            if (currentEvent >= 0) events.RemoveAt(currentEvent);
+            var reads = events.Count(entry => entry.FileRead);
+            Visible("ToggleReadsButton", reads > 0);
+            Find<Button>("ToggleReadsButton").Content = showFileReads ? "Hide file reads" : "Show file reads (" + reads + ")";
+            if (!showFileReads) events.RemoveAll(entry => entry.FileRead);
+            Visible("DetailTask", summary != "");
+            Visible("DetailHistory", events.Count > 0);
+            var list = Find<ItemsControl>("DetailEvents");
+            list.Tag = workspace;
+            var shown = list.ItemsSource as IEnumerable<ActivityEvent>;
+            if (shown == null || !shown.SequenceEqual(events)) list.ItemsSource = events;
         }
         private void Back()
         {
@@ -309,7 +448,7 @@ namespace Orbit
         {
             var agent = agents.FirstOrDefault(a => a.Id == detailId);
             if (agent == null) return;
-            var text = agent.Name + " · " + agent.StatusLabel + "\r\n" + agent.Task + "\r\n\r\n" + String.Join("\r\n", agent.Events.Select(e => e.At.ToLocalTime().ToString("HH:mm:ss") + "  " + e.Text));
+            var text = agent.Name + " · " + agent.StatusLabel + "\r\n" + agent.ActivityDetail + "\r\n\r\n" + String.Join("\r\n", agent.Events.Select(e => e.At.ToLocalTime().ToString("HH:mm:ss") + "  " + e.Body));
             try { Clipboard.SetText((preview ? "[Preview data]\r\n" : "") + text); Find<Button>("CopyButton").Content = "Copied ✓"; }
             catch (System.Runtime.InteropServices.ExternalException) { Find<Button>("CopyButton").Content = "Clipboard busy · try again"; }
         }
@@ -389,6 +528,12 @@ namespace Orbit
         {
             if (animating) { expandRequested = true; return; }
             if (collapsed) ToggleCollapsed();
+        }
+        private void OpenFromPill()
+        {
+            if (collapsed && selectedChat == null && current.Chats != null && current.ActiveChat != null)
+                SelectChat(current.ActiveChat.Id);
+            RequestExpand();
         }
         private void ShowWidget() { Window.Show(); RequestExpand(); Window.Activate(); Back(); }
         private void Quit() { closing = true; Window.Close(); Application.Current.Shutdown(); }

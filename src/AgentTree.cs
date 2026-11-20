@@ -11,23 +11,21 @@ namespace Orbit
         public string Key { get; set; }
         public string Kind { get; set; }
         public Agent Agent { get; set; }
-        public ActivityEvent Activity { get; set; }
         public string Caption { get; set; }
+        public string Description { get; set; }
+        public string GroupHint { get; set; }
+        public ChatSummary Chat { get; set; }
         public bool Seeded;
         public readonly ObservableCollection<TreeNode> Items = new ObservableCollection<TreeNode>();
         public ObservableCollection<TreeNode> Children { get { return Items; } }
         private bool expanded;
         public bool IsExpanded { get { return expanded; } set { if (expanded == value) return; expanded = value; Notify(); } }
-        public string Title { get { return Kind == "agent" ? Agent.DisplayName : Kind == "event" ? Activity.Text : Caption; } }
-        public string Subtitle { get { return Kind == "agent" ? Agent.Task : ""; } }
+        public string Title { get { return Kind == "agent" ? Agent.DisplayName : Caption; } }
+        public string Subtitle { get { return Kind == "agent" ? ActivityLinks.PlainSummary(Agent.ActivityDetail) : ""; } }
         public string Status { get { return Kind == "agent" ? Agent.StatusLabel : ""; } }
         public System.Windows.Media.Brush StatusBrush { get { return Kind == "agent" ? Agent.AccentBrush : Palette.State("idle"); } }
-        public string Elapsed { get { return Kind == "agent" ? Agent.Elapsed : Kind == "event" ? Activity.At.ToLocalTime().ToString("HH:mm:ss") : ""; } }
         public string AccessibleName { get { return Kind == "agent" ? Agent.AccessibleName : Title; } }
-        public int ReplyCount { get { return Children.Count(c => c.Kind == "agent"); } }
-        public bool HasReplies { get { return ReplyCount > 0; } }
-        public string ReplyLabel { get { return ReplyCount == 1 ? "1 reply" : ReplyCount + " replies"; } }
-        public string Hint { get { return Kind == "agent" ? Agent.Name + "\n" + Agent.Task + "\nLast update " + (Agent.Updated == DateTime.MinValue ? "unknown" : Agent.Updated.ToLocalTime().ToString("HH:mm:ss")) + " · " + Agent.Id : Kind == "event" ? Activity.Text : Title; } }
+        public string Hint { get { return Kind == "agent" ? Agent.AccessibleName : GroupHint ?? Title; } }
         public event PropertyChangedEventHandler PropertyChanged;
         public void Notify() { if (PropertyChanged != null) PropertyChanged(this, new PropertyChangedEventArgs("")); }
     }
@@ -46,6 +44,36 @@ namespace Orbit
         }
         public void Clear() { nodes.Clear(); Roots.Clear(); }
         public void Refresh() { foreach (var node in nodes.Values.Where(n => n.Kind == "agent")) node.Notify(); }
+        public void UpdateCatalog(IEnumerable<ChatSummary> chats)
+        {
+            var used = new HashSet<string>();
+            var roots = new List<TreeNode>();
+            foreach (var group in chats.GroupBy(chat => chat.ProjectKey))
+            {
+                var first = group.First();
+                var project = Get("project:" + group.Key, "project", used);
+                project.Caption = first.ProjectName;
+                project.GroupHint = first.ProjectHint == "" ? first.ProjectName : first.ProjectHint;
+                if (!project.Seeded) { project.IsExpanded = roots.Count == 0; project.Seeded = true; }
+                var items = new List<TreeNode>();
+                foreach (var chat in group)
+                {
+                    var node = Get("chat:" + chat.Id, "chat", used);
+                    node.Chat = chat;
+                    node.Caption = chat.Title;
+                    node.Description = chat.Updated.ToLocalTime().ToString("dd MMM yyyy · HH:mm") + (chat.Archived ? " · Archived" : "");
+                    node.GroupHint = node.Caption + "\n" + chat.Id;
+                    node.Notify();
+                    items.Add(node);
+                }
+                project.Description = items.Count == 1 ? "1 chat" : items.Count + " chats";
+                Sync(project.Items, items);
+                project.Notify();
+                roots.Add(project);
+            }
+            Sync(Roots, roots);
+            foreach (var key in nodes.Keys.Where(key => !used.Contains(key)).ToList()) nodes.Remove(key);
+        }
         public void Update(IEnumerable<Agent> source, string session, string project)
         {
             var all = source.GroupBy(a => a.Id).Select(g => g.First()).OrderBy(a => a.Started).ThenBy(a => a.Id).ToList();
@@ -69,16 +97,8 @@ namespace Orbit
             {
                 var node = nodes["agent:" + agent.Id];
                 var children = all.Where(a => parents[a.Id] == agent.Id).Select(a => nodes["agent:" + a.Id]).ToList();
-                var hasAgents = children.Count > 0;
-                foreach (var activity in agent.Events
-                    .GroupBy(e => e.At.Ticks + "\n" + e.Text).Select(g => g.First())
-                    .OrderByDescending(e => e.At).Take(5))
-                {
-                    var key = "event:" + agent.Id + ":" + activity.At.Ticks + ":" + activity.Text;
-                    var item = Get(key, "event", used); item.Activity = activity; item.Notify(); children.Add(item);
-                }
                 Sync(node.Items, children);
-                if (!node.Seeded) { node.IsExpanded = agent.IsRoot || hasAgents || agent.State == "working" || agent.State == "attention" || agent.State == "error" || agent.State == "waiting"; node.Seeded = true; }
+                if (!node.Seeded && children.Count > 0) { node.IsExpanded = true; node.Seeded = true; }
                 node.Notify();
             }
             var roots = all.Where(a => parents[a.Id] == "")

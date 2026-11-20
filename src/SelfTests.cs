@@ -91,18 +91,11 @@ namespace Orbit
                 tree.Update(demo.Agents, demo.Session, demo.Project);
                 Check(tree.Roots.Count == 1, "The tree presents a single session root");
                 Check(tree.Find("agent:builder").Children.Any(n => n.Key == "agent:tester"), "Subagents nest under the agent that spawned them");
-                Check(tree.Find("agent:builder").Children.Any(n => n.Kind == "event") && tree.Find("agent:builder").Children.Where(n => n.Kind == "event").All(n => n.Activity.AgentId == "builder") && !Flatten(tree.Roots).Any(n => n.Kind == "activity"), "Recent events appear directly under their agent without an Activity dropdown");
+                Check(tree.Find("agent:builder").Children.All(n => n.Kind == "agent"), "Chat trees show agents without inline activity rows");
                 tree.Find("agent:builder").IsExpanded = false;
                 var savedBranch = tree.Find("agent:builder");
-                var savedEvent = savedBranch.Children.First(n => n.Kind == "event");
                 tree.Update(demo.Agents.Select(a => a.Copy()), demo.Session, demo.Project);
-                Check(!tree.Find("agent:builder").IsExpanded && Object.ReferenceEquals(savedBranch, tree.Find("agent:builder")) && Object.ReferenceEquals(savedEvent, tree.Find(savedEvent.Key)), "Live updates preserve agent expansion and inline event identity");
-                var historyAgent = demo.Agents.Single(a => a.Id == "builder").Copy();
-                historyAgent.Events.AddRange(Enumerable.Range(1, 8).Select(i => new ActivityEvent { AgentId = historyAgent.Id, Agent = historyAgent.Name, Text = "Step " + i, At = DateTime.UtcNow.AddSeconds(i) }));
-                var historyCount = historyAgent.Events.Count;
-                tree.Update(new[] { historyAgent }, "history", "test");
-                var recentEvents = tree.Find("agent:builder").Children.Where(n => n.Kind == "event").ToList();
-                Check(recentEvents.Count == 5 && recentEvents.First().Activity.Text == "Step 8" && recentEvents.Last().Activity.Text == "Step 4" && historyAgent.Events.Count == historyCount, "Inline events show the latest five while preserving full detail history");
+                Check(!tree.Find("agent:builder").IsExpanded && Object.ReferenceEquals(savedBranch, tree.Find("agent:builder")), "Live updates preserve agent expansion and row identity");
                 var cyclic = new[] {
                     new Agent { Id = "a", ParentId = "b", Name = "A", State = "working" },
                     new Agent { Id = "b", ParentId = "a", Name = "B", State = "working" },
@@ -115,22 +108,126 @@ namespace Orbit
                 var botTree = new AgentTree();
                 botTree.Update(demo.Agents, demo.Session, demo.Project);
                 var botBuilder = botTree.Find("agent:builder");
-                Check(botBuilder.ReplyCount == 1 && botBuilder.HasReplies && botBuilder.ReplyLabel == "1 reply", "Bot cards count nested subagents as replies");
+                Check(botBuilder.Children.Count == 1 && botBuilder.IsExpanded, "Branches with subagents open by default");
+                var finished = new Agent { Name = "Reviewer", State = "completed", Task = "Work complete" };
+                finished.Events.Add(new ActivityEvent { Text = "Reviewed two files" });
+                finished.Events.Add(new ActivityEvent { Text = "Completed the task" });
+                Check(finished.ActivitySummary == "Reviewed two files" && finished.Events.Count == 2,
+                    "Completed rows show meaningful work and keep lifecycle entries in the recorded log");
                 Check(botTree.Find("agent:builder").Title == "/Builder" && new Agent { Id = "x", Name = "Session 17:17", IsRoot = true }.DisplayName == "/root", "Leads show as /root, subagents with a slash prefix");
                 var actRoot = new Agent { Id = "aroot", Name = "Root", State = "working", Task = "Leading", Started = DateTime.UtcNow.AddMinutes(-2), Updated = DateTime.UtcNow };
                 var actSub = new Agent { Id = "asub", ParentId = "aroot", Name = "Sub", State = "working", Task = "Helping", Started = DateTime.UtcNow.AddMinutes(-1), Updated = DateTime.UtcNow };
                 actSub.Events.Add(new ActivityEvent { AgentId = "asub", Agent = "Sub", Text = "Live progress", State = "working", At = DateTime.UtcNow });
                 var liveTree = new AgentTree();
                 liveTree.Update(new[] { actRoot, actSub }, "live", "test");
-                Check(liveTree.Find("agent:asub").IsExpanded, "Active subagents auto-expand so live activity is visible");
-                Check(botTree.Find("agent:explorer").ReplyCount == 0 && !botTree.Find("agent:explorer").HasReplies, "Leaf bots hide the replies toggle");
+                Check(!liveTree.Find("agent:asub").IsExpanded && actSub.Events.Count == 1, "Leaf agents stay compact and retain their recorded activity");
+                var newChild = new Agent { Id = "new-child", ParentId = "asub", Name = "Child", State = "working" };
+                liveTree.Update(new[] { actRoot, actSub, newChild }, "live", "test");
+                Check(liveTree.Find("agent:asub").IsExpanded, "A new subagent reveals its branch when the first child arrives");
 
                 var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+                var localPath = Path.Combine(root, "observatory (draft).mjs");
+                File.WriteAllText(localPath, "// synthetic fixture");
+                var absoluteLink = "[booking planner](</" + localPath.Replace('\\', '/') + ":12>)";
+                var linkBlock = new ActivityTextBlock { Workspace = root, Body = "Built " + absoluteLink + ".\n\n" + new string('x', 260) + " [source](<observatory (draft).mjs#L4>)" };
+                var references = linkBlock.Inlines.OfType<System.Windows.Documents.Hyperlink>().ToList();
+                Check(references.Count == 2 && (string)references[0].ToolTip == localPath + ":12" &&
+                      (string)references[1].ToolTip == localPath + ":4" && !linkBlock.Text.Contains(root),
+                    "Windows file links and relative line references render by label after the old text limit");
+                Check(ActivityLinks.Resolve("file:///C:/Notes/plan%20draft.mjs:20:3", root).Reference == @"C:\Notes\plan draft.mjs:20" &&
+                      ActivityLinks.Resolve(@"\\server\share\file.txt", root) == null &&
+                      ActivityLinks.Resolve("https://example.test/file.md", root) == null &&
+                      ActivityLinks.Resolve(@"C:\Notes\file.txt:stream", root) == null,
+                    "The local link resolver handles encoded paths and rejects URLs, network shares, and alternate streams");
+                var tableBlock = new ActivityTextBlock {
+                    Workspace = root,
+                    Body = "| Role | Effort | Observed result |\n| --- | --- | --- |\n| Optimizer | Medium | " + absoluteLink + " |\n| Reviewer | Low | Passed |\n\n- Verify the public results"
+                };
+                var table = tableBlock.Inlines.OfType<System.Windows.Documents.InlineUIContainer>()
+                    .Select(item => item.Child).OfType<ActivityMarkdownTable>().Single();
+                Check(table.ColumnHeaders.SequenceEqual(new[] { "Role", "Effort", "Observed result" }) && table.DataRowCount == 2,
+                    "Structured activity renders a native table with separate headings and rows");
+                var variedTables = new ActivityTextBlock {
+                    Body = "| Agent | State |\n| --- | --- |\nPlanner\n| Coordinator |\n| Reviewer | Done | extra |\n| Builder | Working |\n\n" +
+                           "| Result |\n| --- |\n| Verified |\n\nA normal paragraph."
+                };
+                var variations = variedTables.Inlines.OfType<System.Windows.Documents.InlineUIContainer>()
+                    .Select(item => item.Child).OfType<ActivityMarkdownTable>().ToArray();
+                Check(variations.Length == 2 && variations[0].DataRowCount == 4 && variations[0].Children.Count == 10 &&
+                      variations[1].ColumnHeaders.SequenceEqual(new[] { "Result" }) && variations[1].DataRowCount == 1,
+                    "Uneven rows and single-column tables stay structured without consuming surrounding text");
+                var graphData = new[] {
+                    new Agent { Id = "lead", IsRoot = true, Name = "Lead", State = "completed", Result = "Integrated the scheduler and CLI." },
+                    new Agent { Id = "coordinator", ParentId = "lead", Name = "Coordinator", State = "completed", Task = "Assigned parser and optimizer work." },
+                    new Agent { Id = "parser", ParentId = "coordinator", Name = "Input parser", State = "completed", Task = "Validated input and normalized dates." },
+                    new Agent { Id = "optimizer", ParentId = "coordinator", Name = "Optimizer", State = "working", Task = "Checking the schedule against an independent reference." },
+                    new Agent { Id = "reviewer", ParentId = "lead", Name = "Reviewer", State = "waiting", Task = "Reviewed the parser and is waiting on optimization checks." }
+                };
+                graphData[0].Events.Add(new ActivityEvent {
+                    Text = "Integrated the scheduler and CLI.",
+                    Detail = "Integrated the scheduler and CLI.\n\n| Check | Result |\n| --- | --- |\n| Exhaustive reference | Matched all 120 cases |\n| Parser review | Approved |",
+                    At = DateTime.UtcNow
+                });
+                graphData[0].Events.Add(new ActivityEvent { Text = "The parser and optimizer use the same module contract.", At = DateTime.UtcNow.AddMinutes(-1) });
+                var layout = AgentGraphLayout.Create(graphData);
+                Check(layout.Nodes.Count() == 5 && layout.Nodes.Count(node => !String.IsNullOrEmpty(node.ParentId)) == 4 &&
+                      layout.Nodes.Single(node => node.Agent.Id == "optimizer").Depth == 2,
+                    "Workflow graph preserves nested delegation and its four real parent edges");
                 using (var signal = new EventWaitHandle(false, EventResetMode.AutoReset))
                 {
                     var widget = new Widget(new Options(new[] { "--demo", "--workspace", root, "--events", events }), signal);
                     var liveWindow = widget.Window;
                     liveWindow.Show(); Pump(400);
+                    var previewGraph = new AgentGraphWindow { Owner = liveWindow };
+                    previewGraph.Update("Observatory booking planner", graphData, root);
+                    previewGraph.Show(); Pump(60);
+                    var screen = System.Windows.Forms.Screen.FromHandle(new System.Windows.Interop.WindowInteropHelper(liveWindow).Handle).WorkingArea;
+                    var center = previewGraph.PointToScreen(new Point(previewGraph.ActualWidth / 2, previewGraph.ActualHeight / 2));
+                    Check(Math.Abs(center.X - (screen.Left + screen.Width / 2.0)) < 3 &&
+                          Math.Abs(center.Y - (screen.Top + screen.Height / 2.0)) < 3,
+                        "The graph opens centered in the widget monitor's usable area");
+                    var frame = ((Grid)previewGraph.Content).Children.OfType<Grid>().Single();
+                    var graphGlass = frame.Children.OfType<Border>().Single();
+                    var compactGlass = (Border)liveWindow.FindName("Surface");
+                    Check(previewGraph.AllowsTransparency && graphGlass.CornerRadius.TopLeft == 15 &&
+                          ReferenceEquals(graphGlass.Background, compactGlass.Background) &&
+                          ReferenceEquals(graphGlass.BorderBrush, compactGlass.BorderBrush),
+                        "The graph uses the same rounded translucent glass as the widget");
+                    Check(!SystemParameters.ClientAreaAnimation ||
+                          DependencyPropertyHelper.GetValueSource(previewGraph, UIElement.OpacityProperty).IsAnimated,
+                        "The graph animates its entrance when motion is enabled");
+                    var corner = previewGraph.PointToScreen(new Point(previewGraph.ActualWidth - 2, previewGraph.ActualHeight - 2));
+                    var cornerParameter = (int)(short)corner.X & 0xffff | ((int)(short)corner.Y & 0xffff) << 16;
+                    var target = new System.Windows.Interop.WindowInteropHelper(previewGraph).Handle;
+                    Check(SendMessage(target, 0x0084, IntPtr.Zero, new IntPtr(cornerParameter)).ToInt32() == 17,
+                        "The translucent graph retains native resize hit testing at its corners");
+                    Pump(320);
+                    var viewport = FindVisual<ScrollViewer>(previewGraph, view =>
+                        System.Windows.Automation.AutomationProperties.GetName(view) == "Agent delegation graph");
+                    var anchor = new Point(viewport.ViewportWidth / 2, viewport.ViewportHeight / 2);
+                    previewGraph.SetZoom(1.5, anchor); Pump(120);
+                    Check(Math.Abs(previewGraph.Zoom - 1.5) < 0.001 && viewport.ScrollableWidth > 0,
+                        "Zooming enlarges the graph and its scrollable canvas");
+                    var busyGraph = graphData.Concat(Enumerable.Range(1, 12).Select(i => new Agent {
+                        Id = "worker-" + i, ParentId = "lead", Name = "Worker " + i, Task = "Checking work."
+                    })).ToList();
+                    previewGraph.Update("Observatory booking planner", busyGraph, root); Pump(120);
+                    previewGraph.FitGraph(); Pump(120);
+                    Check(previewGraph.Zoom < 1 && viewport.ScrollableHeight < 1 && viewport.ScrollableWidth < 1,
+                        "Fit brings all nodes into view for a tall graph");
+                    previewGraph.Update("Observatory booking planner", graphData, root);
+                    previewGraph.SetZoom(1, anchor); Pump(100);
+                    previewGraph.SelectAgent("reviewer");
+                    Check(previewGraph.HighlightedEdges == 1, "Selecting a leaf highlights its recorded route");
+                    var parentLine = FindVisual<TextBlock>(previewGraph, block => block.Inlines.OfType<System.Windows.Documents.Hyperlink>()
+                        .Any(link => (string)link.ToolTip == "Focus /root"));
+                    var parentLink = parentLine.Inlines.OfType<System.Windows.Documents.Hyperlink>().Single();
+                    parentLink.RaiseEvent(new RoutedEventArgs(System.Windows.Documents.Hyperlink.ClickEvent, parentLink));
+                    Check(previewGraph.SelectedAgentId == "lead" && previewGraph.HighlightedEdges == 4,
+                        "Inspector links jump to related nodes and highlight the new branch");
+                    previewGraph.SelectAgent("coordinator"); Pump(230);
+                    Render(previewGraph, Path.Combine(root, "workflow-graph.png"));
+                    previewGraph.Close();
                     var nativeTree = (TreeView)liveWindow.FindName("AgentTreeView");
                     Check(liveWindow.IsVisible && Flatten(nativeTree.Items.Cast<TreeNode>()).Count(n => n.Kind == "agent") == 4, "Native tree starts with all four preview agents");
                     Check(liveWindow.Resources.Contains("SlimBar"), "Slim scrollbar style replaces the wide system bar");
@@ -146,15 +243,20 @@ namespace Orbit
                     var liveNodes = Flatten(nativeTree.Items.Cast<TreeNode>()).ToList();
                     var builderNode = liveNodes.Single(n => n.Key == "agent:builder");
                     builderNode.IsExpanded = true; Pump(100);
-                    Check(builderNode.Children.Any(n => n.Kind == "event") && builderNode.Children.Where(n => n.Kind == "event").All(n => n.Activity.AgentId == "builder") && !liveNodes.Any(n => n.Kind == "activity"), "One agent expansion reveals its subagents and activity directly");
-                    Render(liveWindow, Path.Combine(root, "tree-activity.png"));
+                    Check(builderNode.Children.Count == 1 && builderNode.Children[0].Key == "agent:tester", "Expanding an agent reveals just its subagents");
                     Pump(1600);
-                    Check(Object.ReferenceEquals(builderNode, Flatten(nativeTree.Items.Cast<TreeNode>()).Single(n => n.Key == "agent:builder")) && builderNode.IsExpanded, "A background poll preserves the open agent branch and inline activity");
+                    Check(Object.ReferenceEquals(builderNode, Flatten(nativeTree.Items.Cast<TreeNode>()).Single(n => n.Key == "agent:builder")) && builderNode.IsExpanded, "A background poll preserves the open agent branch");
 
                     var rowButton = FindAgentButton(nativeTree, "builder");
                     Check(rowButton != null, "Agent details have an accessible native button");
                     rowButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, rowButton)); Pump(230);
                     Check(((FrameworkElement)liveWindow.FindName("DetailView")).Visibility == Visibility.Visible && ((TextBlock)liveWindow.FindName("DetailName")).Text == "/Builder", "Agent detail button opens the correct branch");
+                    var summary = ((ActivityTextBlock)liveWindow.FindName("DetailTask")).Body;
+                    var history = ((ItemsControl)liveWindow.FindName("DetailEvents")).Items.Cast<ActivityEvent>().ToList();
+                    Check(summary != "" && history.Any(item => item.Text == "Picked up the task") && history.All(item => item.Text != summary),
+                        "Agent details show earlier activity once and keep the current task above it");
+                    Check(liveWindow.FindName("DetailElapsed") == null && liveWindow.FindName("DetailParent") == null,
+                        "Agent details omit elapsed time and redundant parent metadata");
                     Render(liveWindow, Path.Combine(root, "detail.png"));
                     Press(liveWindow, "BackButton"); Press(liveWindow, "SettingsButton"); Pump(230);
                     Check(((FrameworkElement)liveWindow.FindName("SettingsView")).Visibility == Visibility.Visible, "Settings open inside the same window");
@@ -189,6 +291,7 @@ namespace Orbit
                     Render(liveWindow, Path.Combine(root, "empty.png"));
                     liveWindow.Close();
                 }
+                CheckProjectCatalog(root);
                 report.Add("\n" + count + " checks passed.\nArtifacts: " + root);
             }
             catch (Exception ex) { report.Add(ex.ToString()); exit = 1; }
@@ -208,6 +311,221 @@ namespace Orbit
             for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++) { var found = FindAgentButton(VisualTreeHelper.GetChild(root, i), id); if (found != null) return found; }
             return null;
         }
+        private static Button FindChatButton(DependencyObject root, string id)
+        {
+            var button = root as Button;
+            if (button != null && button.Tag is ChatSummary && ((ChatSummary)button.Tag).Id == id) return button;
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+            {
+                var found = FindChatButton(VisualTreeHelper.GetChild(root, i), id);
+                if (found != null) return found;
+            }
+            return null;
+        }
+        private static T FindVisual<T>(DependencyObject root, Func<T, bool> matches) where T : DependencyObject
+        {
+            var node = root as T;
+            if (node != null && matches(node)) return node;
+            for (int index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
+            {
+                var found = FindVisual(VisualTreeHelper.GetChild(root, index), matches);
+                if (found != null) return found;
+            }
+            return null;
+        }
+        private static void CheckProjectCatalog(string root)
+        {
+            var home = Path.Combine(root, "catalog");
+            var recent = Directory.CreateDirectory(Path.Combine(home, "sessions", "2026", "11", "20")).FullName;
+            var old = Directory.CreateDirectory(Path.Combine(home, "sessions", "2025", "01", "02")).FullName;
+            var archived = Directory.CreateDirectory(Path.Combine(home, "archived_sessions")).FullName;
+            var first = Path.Combine(root, "Field Notes");
+            var second = Path.Combine(root, "Weather Station");
+            Directory.CreateDirectory(Path.Combine(second, ".git"));
+            var now = DateTime.UtcNow;
+            WriteSession(Path.Combine(old, "first.jsonl"), "catalog-main", "", "", first, "cli", now);
+            WriteSession(Path.Combine(recent, "child.jsonl"), "catalog-child", "catalog-main", "", second, "cli", now);
+            var agentLog = Path.Combine(old, "first.jsonl");
+            AppendJson(agentLog, new { timestamp = now.ToString("o"), type = "event_msg", payload = new { type = "item_completed",
+                item = new { type = "CommandExecution", status = "completed", exit_code = 0, parsed_cmd = new[] { new { type = "read", path = Path.Combine(first, "brief.md") } } } } });
+            var reportLink = "Built the [booking planner](<plan.mjs:12>).\n\n" +
+                "| Role | Effort | Observed result |\n| --- | --- | --- |\n" +
+                "| Coordinator | Medium | Assigned work against a shared contract. |\n" +
+                "| Optimizer | Medium | Matched the reference on all 120 cases. |\n" +
+                "| Reviewer | Low | Approved both revisions. |\n\n" +
+                "The CLI selected **A, C, E** for a score of 18.";
+            AppendJson(agentLog, new { timestamp = now.ToString("o"), type = "event_msg", payload = new { type = "item_completed",
+                item = new { type = "AgentMessage", phase = "final_answer", content = reportLink } } });
+            AppendJson(Path.Combine(old, "first.jsonl"), new { timestamp = now.ToString("o"), type = "event_msg", payload = new { type = "task_complete" } });
+            AppendJson(Path.Combine(recent, "child.jsonl"), new { timestamp = now.ToString("o"), type = "event_msg", payload = new { type = "task_complete" } });
+            WriteSession(Path.Combine(recent, "second.jsonl"), "catalog-second", "", "", second, "cli", now.AddMinutes(-10));
+            WriteSession(Path.Combine(archived, "archived.jsonl"), "catalog-archived", "", "", first, "cli", now);
+            WriteSession(Path.Combine(recent, "loose.jsonl"), "catalog-loose", "", "", first, "cli", now.AddMinutes(-10));
+            File.SetLastWriteTimeUtc(Path.Combine(recent, "second.jsonl"), now.AddMinutes(-5));
+            File.SetLastWriteTimeUtc(Path.Combine(recent, "loose.jsonl"), now.AddMinutes(-10));
+            File.SetLastWriteTimeUtc(Path.Combine(archived, "archived.jsonl"), now.AddMinutes(-15));
+            var index = Path.Combine(home, "session_index.jsonl");
+            AppendJson(index, new { id = "catalog-main", thread_name = "Organize the research notes" });
+            AppendJson(index, new { id = "catalog-second", thread_name = "Check the weather station readings" });
+            AppendJson(index, new { id = "catalog-loose", thread_name = "Draft a quick checklist" });
+            AppendJson(index, new { id = "catalog-archived", thread_name = "Review last month’s notes" });
+            AppendJson(Path.Combine(home, ".codex-global-state.json"), new Dictionary<string, object> {
+                { "local-projects", new { field = new { id = "field", name = "Field Notes", rootPaths = new[] { first } } } },
+                { "thread-project-assignments", new Dictionary<string, object> {
+                    { "catalog-main", new { projectKind = "local", projectId = "field" } },
+                    { "catalog-explicit", new { projectKind = "local", projectId = "field" } }
+                } },
+                { "projectless-thread-ids", new[] { "catalog-loose" } }
+            });
+            var catalog = new ChatCatalog(home, null);
+            var listing = catalog.Poll(null).Chats;
+            Check(listing.Count == 4 && listing.Select(chat => chat.ProjectKey).Distinct().Count() == 3,
+                "Catalog groups chats across dates and folders, without listing children as chats");
+            Check(listing.Single(chat => chat.Id == "catalog-main").Title == "Organize the research notes" &&
+                listing.Single(chat => chat.Id == "catalog-archived").Archived &&
+                listing.Single(chat => chat.Id == "catalog-second").ProjectName == "Weather Station" &&
+                listing.Single(chat => chat.Id == "catalog-loose").ProjectName == "Projectless chats",
+                "Catalog picks up desktop titles, archived chats, folder names, and projectless assignments");
+            Check(catalog.Poll("catalog-main").Agents.Any(agent => agent.Id == "catalog-child" && agent.ParentId == "catalog-main"),
+                "Selected chats include subagents from other date folders and workspaces");
+            Check(catalog.Poll("catalog-archived").Agents.Single().Id == "catalog-archived",
+                "Archived chat activity opens from the catalog");
+            using (var signal = new EventWaitHandle(false, EventResetMode.AutoReset))
+            {
+                var settings = new Options(new[] { "--workspace", root, "--all-projects" }) { CatalogHome = home };
+                var window = new Widget(settings, signal).Window;
+                window.Show(); Pump(500);
+                var tree = (TreeView)window.FindName("AgentTreeView");
+                Check(tree.Items.Count == 3, "Windows widget creates one row per project group");
+                Render(window, Path.Combine(root, "projects.png"));
+                var button = FindChatButton(tree, "catalog-main");
+                Check(button != null, "A chat in the projects view has a clickable row");
+                button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, button));
+                Pump(500);
+                Check(Flatten(tree.Items.Cast<TreeNode>()).Count(node => node.Kind == "agent") == 2,
+                    "Clicking a chat switches the widget to that chat's agent tree");
+                Check(((TextBlock)window.FindName("SourceLabel")).Text == "Local activity",
+                    "The chat footer omits session IDs and the time since its last update");
+                Press(window, "GraphButton"); Pump(350);
+                var graphWindow = window.OwnedWindows.OfType<AgentGraphWindow>().Single();
+                Check(graphWindow.IsVisible && graphWindow.ActualWidth > window.ActualWidth &&
+                      graphWindow.NodeCount == 2 && graphWindow.EdgeCount == 1,
+                    "A chat opens its workflow in a larger owned Windows popup");
+                Check(graphWindow.SelectedAgentId == "catalog-main" && graphWindow.SelectedActivity == reportLink,
+                    "The graph inspector starts on the lead and preserves its full formatted result");
+                Check(graphWindow.SelectAgent("catalog-child"), "A subagent node can be selected for inspection");
+                var rootButton = FindAgentButton(tree, "catalog-main");
+                rootButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, rootButton)); Pump(200);
+                var detail = (ActivityTextBlock)window.FindName("DetailTask");
+                var eventsView = (ItemsControl)window.FindName("DetailEvents");
+                Check(detail.Body == reportLink && detail.Inlines.OfType<System.Windows.Documents.Hyperlink>().Count() == 1 &&
+                      eventsView.Items.Count == 0 && ((Button)window.FindName("ToggleReadsButton")).IsVisible,
+                    "The expanded result preserves formatting and file reads start hidden");
+                Render(window, Path.Combine(root, "formatted-agent-details.png"));
+                Press(window, "ToggleReadsButton"); Pump(100);
+                Check(eventsView.Items.Cast<ActivityEvent>().Single().Body.Contains("[brief.md]"),
+                    "Showing routine reads restores their clickable file reference");
+                Press(window, "BackButton");
+                Press(window, "SourceButton"); Pump(500);
+                Check(tree.Items.Count == 3 && ((TreeNode)tree.Items[0]).IsExpanded,
+                    "Projects navigation returns to the grouped list and preserves expansion");
+                Press(window, "CollapseButton"); Pump(400);
+                Check(((TextBlock)window.FindName("PillTitle")).Text == "No active chats", "The minimized project list reports when no chats are active");
+                AppendJson(Path.Combine(recent, "child.jsonl"),
+                    new { timestamp = DateTime.UtcNow.ToString("o"), type = "event_msg", payload = new { type = "task_started" } });
+                AppendJson(Path.Combine(recent, "child.jsonl"),
+                    new { timestamp = DateTime.UtcNow.ToString("o"), type = "event_msg", payload = new { type = "item_completed",
+                        item = new { type = "AgentMessage", phase = "commentary", content = "Checking overnight schedule boundaries." } } });
+                File.SetLastWriteTimeUtc(Path.Combine(old, "first.jsonl"), now.AddHours(-1));
+                File.SetLastWriteTimeUtc(Path.Combine(recent, "child.jsonl"), now.AddHours(-1));
+                Check(new ChatCatalog(home, null).Poll(null).ActiveChat.Id == "catalog-main",
+                    "Recent rollout events beat stale Windows file write times when detecting active chats");
+                Pump(1800);
+                Check(((TextBlock)window.FindName("PillTitle")).Text == "1 agent working" &&
+                      ((TextBlock)window.FindName("PillSubtitle")).Text == "Organize the research notes",
+                    "The collapsed project list detects activity in a subagent and names its chat");
+                Check(graphWindow.IsVisible && graphWindow.SelectedAgentId == "catalog-child" &&
+                      graphWindow.SelectedActivity == "Checking overnight schedule boundaries.",
+                    "An open workflow retains its selected node and receives updates while the widget shows projects");
+                using (File.Open(Path.Combine(recent, "child.jsonl"), FileMode.Open, FileAccess.Read, FileShare.None))
+                {
+                    Pump(1800);
+                    Check(graphWindow.Title.Contains("Some activity unavailable") && graphWindow.SelectedAgentId == "catalog-child",
+                        "A partial rollout read is disclosed without losing the selected graph node");
+                }
+                Pump(1800);
+                Check(!graphWindow.Title.Contains("Some activity unavailable"), "The graph clears its read warning when activity is available again");
+                Render(window, Path.Combine(root, "active-chat-pill.png"));
+                Press(window, "ExpandButton"); Pump(700);
+                Check(((TextBlock)window.FindName("ProjectLabel")).Text == "Organize the research notes" &&
+                      Flatten(tree.Items.Cast<TreeNode>()).Any(node => node.Key == "agent:catalog-child"),
+                    "Opening the active projects pill jumps straight to the matching agent tree");
+                Press(window, "SourceButton"); Pump(500);
+                foreach (var group in tree.Items.Cast<TreeNode>()) group.IsExpanded = true;
+                Pump(100);
+                var secondChat = FindChatButton(tree, "catalog-second");
+                secondChat.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, secondChat)); Pump(500);
+                Press(window, "GraphButton"); Pump(300);
+                var otherGraph = window.OwnedWindows.OfType<AgentGraphWindow>().Single();
+                Check(!graphWindow.IsVisible && !Object.ReferenceEquals(otherGraph, graphWindow) &&
+                      otherGraph.SelectedAgentId == "catalog-second",
+                    "Opening a different chat's workflow starts with that chat's own root and viewport");
+                otherGraph.Close();
+                window.Close();
+            }
+            var generated = Path.Combine(root, "Documents", "Codex");
+            WriteSession(Path.Combine(recent, "hey-new.jsonl"), "hey-new", "", "", Path.Combine(generated, "2026-11-20", "hey"), "cli", now);
+            WriteSession(Path.Combine(old, "hey-old.jsonl"), "hey-old", "", "", Path.Combine(generated, "2026-11-19", "hey"), "cli", now);
+            WriteSession(Path.Combine(recent, "hey-explicit.jsonl"), "catalog-explicit", "", "", Path.Combine(generated, "2026-11-20", "hey-explicit"), "cli", now);
+            WriteSession(Path.Combine(recent, "hey-invalid.jsonl"), "hey-invalid", "", "", Path.Combine(generated, "2026-02-30", "hey"), "cli", now);
+            var withGenerated = new ChatCatalog(home, null, generated).Poll(null).Chats;
+            Check(withGenerated.Where(chat => chat.ProjectKey == "projectless").Select(chat => chat.Id)
+                    .OrderBy(id => id).SequenceEqual(new[] { "catalog-loose", "hey-new", "hey-old" }),
+                "Codex-generated dated workspaces share the projectless group");
+            Check(withGenerated.Single(chat => chat.Id == "catalog-explicit").ProjectKey == "codex:field" &&
+                  withGenerated.Single(chat => chat.Id == "hey-invalid").ProjectKey != "projectless",
+                "Explicit projects and folders outside the generated format retain their groups");
+            WriteSession(Path.Combine(recent, "orphan.jsonl"), "orphan", "missing", "catalog-main", first, "cli", now);
+            WriteSession(Path.Combine(recent, "orphan-child.jsonl"), "orphan-child", "orphan", "", first, "cli", now);
+            WriteSession(Path.Combine(recent, "cycle-a.jsonl"), "cycle-a", "cycle-b", "catalog-main", first, "cli", now);
+            WriteSession(Path.Combine(recent, "cycle-b.jsonl"), "cycle-b", "cycle-a", "", first, "cli", now);
+            WriteSession(Path.Combine(recent, "attributed.jsonl"), "attributed", "", "catalog-main", first,
+                new { subagent = new { thread_spawn = new { } } }, now);
+            var damaged = new ChatCatalog(home, null).Poll("catalog-main");
+            var damagedLayout = AgentGraphLayout.Create(damaged.Agents);
+            Check(damagedLayout.Nodes.Count == 7 && damagedLayout.EdgeCount == 2 &&
+                  damagedLayout.Nodes.Single(node => node.Agent.Id == "orphan-child").ParentId == "orphan",
+                "The catalog keeps attributed orphan and cycle branches while the graph draws only their recorded valid edges");
+
+            var duplicate = Path.Combine(recent, "side-shell.jsonl");
+            AppendJson(duplicate, new { type = "session_meta", payload = new { id = "side-shell", cwd = first } });
+            AppendJson(duplicate, new { type = "response_item", payload = new {
+                type = "message", role = "user", content = new[] { new { type = "input_text",
+                    text = "Side conversation boundary.\n\nEverything before this boundary is inherited history from the parent thread." } }
+            } });
+            AppendJson(duplicate, new { type = "event_msg", payload = new { type = "turn_aborted" } });
+            var archivedShell = Path.Combine(archived, "archived-shell.jsonl");
+            AppendJson(archivedShell, new { type = "session_meta", payload = new { id = "archived-shell", cwd = first } });
+            AppendJson(archivedShell, new { type = "event_msg", payload = new { type = "thread_settings_applied" } });
+            var separate = Path.Combine(recent, "different-request.jsonl");
+            AppendJson(separate, new { type = "session_meta", payload = new { id = "different-request", cwd = first } });
+            AppendJson(separate, new { type = "response_item", payload = new {
+                type = "message", role = "user", content = new[] { new { type = "input_text", text = "Check a different set of research notes." } }
+            } });
+            AppendJson(Path.Combine(recent, "unrelated-workspace.jsonl"),
+                new { type = "session_meta", payload = new { id = "unrelated-workspace", cwd = second } });
+            AppendJson(index, new { id = "side-shell", thread_name = "Organize the research notes" });
+            AppendJson(index, new { id = "archived-shell", thread_name = "Organize the research notes (2)" });
+            AppendJson(index, new { id = "different-request", thread_name = "Organize the research notes" });
+            AppendJson(index, new { id = "unrelated-workspace", thread_name = "Organize the research notes" });
+            var deduped = new ChatCatalog(home, null).Poll(null).Chats.Select(chat => chat.Id).ToList();
+            Check(!deduped.Contains("side-shell") && !deduped.Contains("archived-shell") &&
+                  deduped.Contains("catalog-main") && deduped.Contains("different-request") && deduped.Contains("unrelated-workspace"),
+                "Duplicate setup shells are hidden while separate conversations and workspaces remain listed");
+            Check(File.Exists(duplicate) && File.Exists(archivedShell), "Deduplication leaves the rollout files in place");
+        }
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern IntPtr SendMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
         private static void Pump(int milliseconds)
         {
             var frame = new DispatcherFrame();

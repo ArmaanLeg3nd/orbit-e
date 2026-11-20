@@ -40,10 +40,12 @@ namespace Orbit
         public string AgentId { get; set; }
         public string Agent { get; set; }
         public string Text { get; set; }
+        public string Detail { get; set; }
+        public bool FileRead { get; set; }
+        public string Body { get { return Detail ?? Text; } }
         public string State { get; set; }
         public DateTime At { get; set; }
-        public string TimeLabel { get { return At.ToLocalTime().ToString("HH:mm"); } }
-        public Brush Brush { get { return Palette.State(State); } }
+        public bool IsLifecycle { get { return Text == "Started working" || Text == "Completed the task"; } }
     }
     public static class Palette
     {
@@ -57,8 +59,11 @@ namespace Orbit
     {
         public string Id { get; set; }
         public string ParentId { get; set; }
+        public string RecordedParentId { get; set; }
         public string Name { get; set; }
+        public string Workspace { get; set; }
         public string Task { get; set; }
+        public string Result { get; set; }
         public string State { get; set; }
         public string Role { get; set; }
         public DateTime Started { get; set; }
@@ -72,19 +77,40 @@ namespace Orbit
         public string DisplayName { get { return IsRoot ? "/root" : (Name ?? "").StartsWith("/") ? Name : "/" + Name; } }
         public string StatusLabel { get { return State == "working" ? "Working" : State == "waiting" ? "Waiting" : State == "completed" ? "Done" : State == "attention" ? "Needs you" : State == "error" ? "Error" : "Idle"; } }
         public string ChildLabel { get { return IsRoot ? "LEAD" : ""; } }
-        public string AccessibleName { get { return Name + ", " + StatusLabel + ", " + Task; } }
-        public string Elapsed
+        public string ActivitySummary
         {
             get
             {
-                var seconds = Math.Max(0, ((Ended == DateTime.MinValue ? DateTime.UtcNow : Ended) - Started).TotalSeconds);
-                return seconds >= 3600 ? ((int)(seconds / 3600)) + "h " + ((int)(seconds % 3600 / 60)) + "m" : seconds >= 60 ? ((int)(seconds / 60)) + "m " + ((int)(seconds % 60)).ToString("00") + "s" : ((int)seconds) + "s";
+                if (State == "completed" && !String.IsNullOrWhiteSpace(Result)) return Result;
+                if (!String.IsNullOrWhiteSpace(Task) && Task != "Starting work" && Task != "Work complete" && Task != "Waiting for activity" &&
+                    Task != "Waiting for a task" && Task != "Reviewing results") return Task;
+                var latest = Events.LastOrDefault(entry => !entry.IsLifecycle && !entry.FileRead) ??
+                    Events.LastOrDefault(entry => !entry.IsLifecycle);
+                return latest == null ? "" : latest.Text;
+            }
+        }
+        public string AccessibleName
+        {
+            get
+            {
+                var summary = ActivityLinks.PlainSummary(ActivityDetail);
+                return DisplayName + ", " + StatusLabel + (summary == "" ? "" : ", " + summary);
+            }
+        }
+        public string ActivityDetail
+        {
+            get
+            {
+                var summary = ActivitySummary;
+                if (summary == "") return "";
+                var entry = Events.LastOrDefault(item => item.Text == summary || Json.Clean(item.Text, 180) == summary);
+                return entry == null ? summary : entry.Body;
             }
         }
         public Agent Copy() { var copy = (Agent)MemberwiseClone(); copy.Events = new List<ActivityEvent>(Events); return copy; }
         public void Refresh(Agent next)
         {
-            ParentId = next.ParentId; Name = next.Name; Task = next.Task; State = next.State; Role = next.Role; Started = next.Started; Updated = next.Updated; Ended = next.Ended; IsRoot = next.IsRoot; Events = next.Events;
+            ParentId = next.ParentId; RecordedParentId = next.RecordedParentId; Name = next.Name; Workspace = next.Workspace; Task = next.Task; Result = next.Result; State = next.State; Role = next.Role; Started = next.Started; Updated = next.Updated; Ended = next.Ended; IsRoot = next.IsRoot; Events = next.Events;
             Notify();
         }
         public void Notify() { if (PropertyChanged != null) PropertyChanged(this, new PropertyChangedEventArgs("")); }
@@ -103,6 +129,11 @@ namespace Orbit
         public List<Agent> Agents = new List<Agent>();
         public List<ActivityEvent> Events = new List<ActivityEvent>();
         public List<SessionSummary> Sessions = new List<SessionSummary>();
+        public List<ChatSummary> Chats;
+        public ChatSummary ActiveChat;
+        public string ActiveChatStatus;
+        public int ActiveChats;
+        public int WorkingAgents;
         public string Project = "";
         public string Source = "Watching local activity";
         public string Problem = "";
@@ -198,11 +229,15 @@ namespace Orbit
         public ActivityReader(string project, string session, string events, string sessionDirectory)
         {
             workspace = project; sessionFilter = session; eventFile = events;
-            var codexDirectory = Environment.GetEnvironmentVariable("CODEX_HOME");
-            if (String.IsNullOrEmpty(codexDirectory)) codexDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex");
-            sessionsPath = sessionDirectory ?? Path.Combine(codexDirectory, "sessions");
+            sessionsPath = sessionDirectory ?? Path.Combine(CodexHome(), "sessions");
         }
-        public Snapshot Poll()
+        internal static string CodexHome()
+        {
+            var directory = Environment.GetEnvironmentVariable("CODEX_HOME");
+            return String.IsNullOrEmpty(directory) ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex") : directory;
+        }
+        public Snapshot Poll() { return Poll(null); }
+        internal Snapshot Poll(ICollection<string> indexedPaths)
         {
             var snapshot = new Snapshot { Project = new DirectoryInfo(workspace).Name };
             try
@@ -218,9 +253,20 @@ namespace Orbit
                 }
                 else
                 {
-                    if (!Directory.Exists(sessionsPath)) { snapshot.Source = "Waiting for Codex"; snapshot.Problem = "Start a local Codex session in this project to see its team here."; return snapshot; }
+                    if (indexedPaths == null && !Directory.Exists(sessionsPath)) { snapshot.Source = "Waiting for Codex"; snapshot.Problem = "Start a local Codex session in this project to see its team here."; return snapshot; }
                     var discoveryInterval = !String.IsNullOrEmpty(sessionFilter) ? 5 : String.IsNullOrEmpty(selectedRoot) ? 1.5 : 5;
-                    if ((DateTime.UtcNow - discoveryAt).TotalSeconds > discoveryInterval) { Discover(); discoveryAt = DateTime.UtcNow; }
+                    if (indexedPaths != null)
+                    {
+                        var changed = false;
+                        foreach (var path in sessions.Keys.Where(path => !indexedPaths.Contains(path)).ToList()) { sessions.Remove(path); changed = true; }
+                        foreach (var path in indexedPaths.Where(path => !sessions.ContainsKey(path)))
+                        {
+                            DiscoverFile(new FileInfo(path), true);
+                            changed = true;
+                        }
+                        if (changed) ResolveAncestry();
+                    }
+                    else if ((DateTime.UtcNow - discoveryAt).TotalSeconds > discoveryInterval) { Discover(); discoveryAt = DateTime.UtcNow; }
                     var pinned = !String.IsNullOrEmpty(sessionFilter);
                     var focus = pinned ? sessionFilter : selectedRoot;
                     var feed = pinned ? new Dictionary<string, List<SessionFile>>(StringComparer.Ordinal) : AllTeams();
@@ -341,11 +387,11 @@ namespace Orbit
                 foreach (var agent in snapshot.Agents)
                 {
                     // A silent log is not proof of completion. Keep that distinction visible.
-                    if (agent.State == "working" && (DateTime.UtcNow - agent.Updated).TotalMinutes > 5) { agent.State = "idle"; agent.Task = "No recent activity · last seen " + agent.Updated.ToLocalTime().ToString("HH:mm"); agent.Ended = agent.Updated; }
+                    if (agent.State == "working" && (DateTime.UtcNow - agent.Updated).TotalMinutes > 5) { agent.State = "idle"; agent.Ended = agent.Updated; }
                 }
                 if (!String.IsNullOrEmpty(eventFile)) snapshot.Agents = snapshot.Agents.OrderByDescending(a => a.IsRoot).ThenBy(a => a.State == "attention" || a.State == "error" ? 0 : a.State == "working" ? 1 : a.State == "waiting" ? 2 : 3).ThenBy(a => a.Started).ThenBy(a => a.Id, StringComparer.Ordinal).ToList();
                 if (String.IsNullOrEmpty(eventFile)) snapshot.TotalAgents = snapshot.Agents.Count;
-                snapshot.Agents = snapshot.Agents.Take(60).ToList();
+                if (indexedPaths == null) snapshot.Agents = snapshot.Agents.Take(60).ToList();
                 if (snapshot.TotalAgents > snapshot.Agents.Count && snapshot.Problem == "")
                 {
                     snapshot.Problem = snapshot.TotalSessions > 1
@@ -425,34 +471,51 @@ namespace Orbit
             if (age.TotalHours < 1) return " · " + Math.Max(1, (int)age.TotalMinutes) + "m ago";
             return " · last write " + lastWrite.ToLocalTime().ToString("HH:mm");
         }
-        private void DiscoverFile(FileInfo file)
+        internal static Dictionary<string, object> ReadMetadata(string path)
         {
-            if (sessions.ContainsKey(file.FullName) || skipped.Contains(file.FullName)) return;
-            Dictionary<string, object> meta;
             try
             {
-                using (var stream = new FileStream(file.FullName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
-                using (var reader = new StreamReader(stream, Encoding.UTF8)) meta = Json.Map(Json.Parse(reader.ReadLine() ?? ""), "payload");
+                using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                using (var reader = new StreamReader(stream, Encoding.UTF8)) return Json.Map(Json.Parse(reader.ReadLine() ?? ""), "payload");
             }
-            catch (IOException) { return; }
-            catch (UnauthorizedAccessException) { return; }
+            catch (IOException) { return null; }
+            catch (UnauthorizedAccessException) { return null; }
+        }
+        internal static Dictionary<string, object> SubagentMetadata(Dictionary<string, object> meta)
+        {
+            return Json.Map(Json.Map(meta, "source"), "subagent") ?? Json.Map(Json.Map(meta, "thread_source"), "subagent");
+        }
+        internal static string ParentThread(Dictionary<string, object> meta, Dictionary<string, object> spawn)
+        {
+            var parent = Json.Text(meta, "parent_thread_id");
+            return parent == "" ? Json.Text(spawn, "parent_thread_id") : parent;
+        }
+        internal static bool IsSubagent(Dictionary<string, object> meta, Dictionary<string, object> subagent, string parent)
+        {
+            return subagent != null || parent != "" ||
+                String.Equals(Json.Text(meta, "thread_source"), "subagent", StringComparison.OrdinalIgnoreCase);
+        }
+        private void DiscoverFile(FileInfo file, bool indexed = false)
+        {
+            if (sessions.ContainsKey(file.FullName) || skipped.Contains(file.FullName)) return;
+            var meta = ReadMetadata(file.FullName);
             if (meta == null || String.IsNullOrEmpty(Json.Text(meta, "id"))) return;
             var cwd = Json.Text(meta, "cwd");
-            if (!WorkspaceMatches(cwd)) { skipped.Add(file.FullName); return; }
-            var source = Json.Map(meta, "source");
-            var subagent = Json.Map(source, "subagent");
+            if (!indexed && !WorkspaceMatches(cwd)) { skipped.Add(file.FullName); return; }
+            var subagent = SubagentMetadata(meta);
             // Internal guardian/review tasks are not user-spawned agents.
             if (subagent != null && Json.Get(subagent, "other") != null) { skipped.Add(file.FullName); return; }
             var spawn = Json.Map(subagent, "thread_spawn");
-            var parent = Json.Text(meta, "parent_thread_id");
-            if (parent == "") parent = Json.Text(spawn, "parent_thread_id");
+            var recordedParent = ParentThread(meta, spawn);
+            var parent = recordedParent;
             var id = Json.Text(meta, "id");
             var session = Json.Text(meta, "session_id");
+            if (indexed && parent == "" && session != id && IsSubagent(meta, subagent, parent)) parent = session;
             var started = Json.Time(meta, "timestamp", file.CreationTimeUtc);
             var name = AgentName(meta, spawn, id, parent, started);
             var role = Json.Text(meta, "agent_role");
             if (role == "") role = Json.Text(spawn, "agent_role");
-            var agent = new Agent { Id = id, ParentId = parent, IsRoot = parent == "", Name = Json.Clean(name, 32), Role = role, Task = "Waiting for activity", State = "idle", Started = Json.Time(meta, "timestamp", file.CreationTimeUtc), Updated = file.LastWriteTimeUtc };
+            var agent = new Agent { Id = id, ParentId = parent, RecordedParentId = recordedParent, IsRoot = parent == "", Name = Json.Clean(name, 32), Workspace = cwd, Role = role, Task = "Waiting for activity", State = "idle", Started = Json.Time(meta, "timestamp", file.CreationTimeUtc), Updated = file.LastWriteTimeUtc };
             sessions[file.FullName] = new SessionFile { Path = file.FullName, RootId = session, DeclaredRootId = session, MetadataParentId = parent, Workspace = cwd, Agent = agent, InitialStarted = agent.Started };
         }
         private string AgentName(Dictionary<string, object> meta, Dictionary<string, object> spawn, string id, string parent, DateTime started)
@@ -646,16 +709,18 @@ namespace Orbit
             {
                 var running = file.Tools.Values.FirstOrDefault(tool => !tool.Name.Contains("wait"));
                 state = running == null ? "waiting" : "working";
-                task = running == null ? "Waiting for a task" : running.Label;
+                task = running == null ? "Waiting for a task" : running.Label == "" ? file.LastActivity : running.Label;
             }
             file.Agent.State = state; file.Agent.Task = task; file.Agent.Ended = DateTime.MinValue;
         }
-        private static void Record(Agent agent, string text, DateTime at, string state = null)
+        private static void Record(Agent agent, string text, DateTime at, string state = null, string detail = null, bool fileRead = false)
         {
             text = Json.Clean(text, 240);
             if (text == "") return;
-            var activity = new ActivityEvent { AgentId = agent.Id, Agent = agent.Name, Text = text, State = state ?? agent.State, At = at };
-            if (agent.Events.Count > 0 && agent.Events[agent.Events.Count - 1].Text == text)
+            if (detail != null && detail.Length > 8192) detail = detail.Substring(0, 8191) + "…";
+            var activity = new ActivityEvent { AgentId = agent.Id, Agent = agent.Name, Text = text, Detail = detail, FileRead = fileRead, State = state ?? agent.State, At = at };
+            if (agent.Events.Count > 0 && agent.Events[agent.Events.Count - 1].Text == text &&
+                agent.Events[agent.Events.Count - 1].Detail == detail)
             {
                 // Snapshots share event objects: replace, never mutate an event on the reader thread.
                 if (at >= agent.Events[agent.Events.Count - 1].At) agent.Events[agent.Events.Count - 1] = activity;
@@ -663,19 +728,6 @@ namespace Orbit
             }
             agent.Events.Add(activity);
             if (agent.Events.Count > 40) agent.Events.RemoveAt(0);
-        }
-        private static string ToolLabel(string name)
-        {
-            name = name.Split('.').Last();
-            if (name.Contains("exec") || name.Contains("command")) return "Running a command";
-            if (name.Contains("patch") || name.Contains("write_file")) return "Updating project files";
-            if (name.Contains("search") || name.Contains("web")) return "Looking up references";
-            if (name.Contains("spawn")) return "Delegating a task";
-            if (name.Contains("wait")) return "Waiting for a task";
-            if (name.Contains("read")) return "Reading project context";
-            if (name.Contains("test")) return "Running checks";
-            if (name.Contains("message")) return "Coordinating with the team";
-            return "Using " + Json.Clean(name.Replace('_', ' '), 46);
         }
         private static string PublicText(Dictionary<string, object> item)
         {
@@ -689,11 +741,10 @@ namespace Orbit
         }
         private static void PublicActivity(SessionFile file, string message, DateTime at)
         {
-            message = Json.Clean(message, 240);
-            if (message == "") return;
+            if (String.IsNullOrWhiteSpace(message)) return;
             file.LastActivity = Json.Clean(message, 180);
             if (file.Agent.Ended == DateTime.MinValue && file.Agent.State != "attention" && file.Agent.State != "waiting") file.Agent.Task = file.LastActivity;
-            Record(file.Agent, message, at);
+            Record(file.Agent, message, at, detail: message.Trim());
         }
         private static void AssistantMessage(SessionFile file, Dictionary<string, object> item, DateTime at, bool publicByDefault)
         {
@@ -702,7 +753,7 @@ namespace Orbit
             if (phase == "analysis" || channel == "analysis") return;
             var final = phase == "final_answer" || channel == "final";
             if (!final && !(phase == "commentary" || channel == "commentary" || (publicByDefault && phase == "" && channel == ""))) return;
-            var message = final ? "" : PublicText(item);
+            var message = PublicText(item);
             if (!final && String.IsNullOrWhiteSpace(message)) return;
             var id = Json.Text(item, "id");
             if (id != "")
@@ -714,55 +765,83 @@ namespace Orbit
             if (final)
             {
                 ClearPending(file); file.Agent.State = "completed"; file.Agent.Ended = at; file.Agent.Task = "Work complete";
-                Record(file.Agent, file.Agent.Task, at);
+                if (!String.IsNullOrWhiteSpace(message))
+                {
+                    file.Agent.Result = Json.Clean(message, 240);
+                    Record(file.Agent, file.Agent.Result, at, detail: message.Trim());
+                }
             }
             else PublicActivity(file, message, at);
         }
-        private static string CommandActivity(object value)
+        private static string CommandText(object value)
         {
             var args = value as object[];
             var command = value as string ?? (args == null ? "" : String.Join(" ", args.OfType<string>()));
             if (args != null)
                 for (int i = 0; i + 1 < args.Length; i++)
                     if (new[] { "-command", "-c", "/c" }.Contains(Convert.ToString(args[i], CultureInfo.InvariantCulture).ToLowerInvariant())) { command = args[i + 1] as string ?? ""; break; }
-            if (command.Length > 32768) command = command.Substring(0, 32768);
-            // Classify locally, but never put raw arguments, paths, or output in the UI.
-            var start = @"(?i)(?:^|[;&|\r\n])\s*(?:&\s+)?['""]?(?:[\w .:\\/-]*[\\/])?";
-            if (Regex.IsMatch(command, start + @"(?:(?:pytest|jest|vitest)\b|python(?:3|\.exe)?\s+-m\s+pytest\b|(?:dotnet|cargo|npm|pnpm|yarn|bun)\s+(?:run\s+)?test\b|build\.ps1\b[^\r\n]*\s-test\b)")) return "checks";
-            if (Regex.IsMatch(command, start + @"(?:build\.ps1\b|(?:dotnet|cargo|npm|pnpm|yarn|bun)\s+(?:run\s+)?build\b)")) return "build";
-            if (Regex.IsMatch(command, start + @"git\s+(status|diff|log|show)\b")) return "changes";
-            if (Regex.IsMatch(command, start + @"(rg|grep|select-string)\b")) return "search";
-            if (Regex.IsMatch(command, start + @"(get-content|read_mcp_resource)\b")) return "read";
-            return "command";
+            return command.Length > 32768 ? command.Substring(0, 32768) : command;
         }
-        private static string CommandLabel(string activity, bool finished)
+        private static string CommandLabel(object value, bool finished, bool failed, string output)
         {
-            switch (activity)
+            var command = CommandText(value);
+            // Match known executables and verbs. Never present arbitrary arguments or output.
+            const string start = @"(?i)(?:^|[;&|\r\n])\s*(?:&\s+)?['""]?(?:[\w .:\\/-]*[\\/])?";
+            var test = Regex.Match(command, start + @"(?:(?:python(?:3|\.exe)?\s+-m\s+)?(pytest|jest|vitest)\b|(dotnet|cargo|npm|pnpm|yarn|bun)\s+(?:run\s+)?test\b|(build\.ps1)\b[^\r\n]*\s-test\b)");
+            if (test.Success)
             {
-                case "checks": return finished ? "Checks finished" : "Running checks";
-                case "build": return finished ? "Build finished" : "Building the project";
-                case "changes": return finished ? "Inspected project changes" : "Inspecting project changes";
-                case "search": return finished ? "Project search finished" : "Searching project files";
-                case "read": return finished ? "Read project context" : "Reading project context";
-                default: return finished ? "Command finished" : "Running a command";
+                var runner = test.Groups[1].Success ? test.Groups[1].Value : test.Groups[2].Success ? test.Groups[2].Value + " test" : "build.ps1";
+                if (!finished) return "Running tests with " + runner;
+                var tail = output.Length > 16384 ? output.Substring(output.Length - 16384) : output;
+                var passed = Regex.Match(tail, @"(?im)^\s*(\d{1,6})\s+(?:checks|tests) passed\.?\s*$");
+                if (!failed && passed.Success) return passed.Groups[1].Value + " checks passed · " + runner;
+                return failed ? "Tests failed · " + runner : "Tests passed · " + runner;
             }
+            var build = Regex.Match(command, start + @"(?:(build\.ps1)\b|(dotnet|cargo|npm|pnpm|yarn|bun)\s+(?:run\s+)?build\b)");
+            if (build.Success)
+            {
+                var runner = build.Groups[1].Success ? "build.ps1" : build.Groups[2].Value + " build";
+                return (finished ? failed ? "Build failed · " : "Build passed · " : "Building with ") + runner;
+            }
+            return "";
         }
         private static string CallLabel(string name, Dictionary<string, object> payload)
         {
             if (name.EndsWith("exec_command", StringComparison.Ordinal))
             {
                 var arguments = Json.Map(payload, "arguments") ?? Json.Parse(Json.Text(payload, "arguments"));
-                return CommandLabel(CommandActivity(Json.Get(arguments, "cmd")), false);
+                return CommandLabel(Json.Get(arguments, "cmd"), false, false, "");
             }
-            if (name.Split('.').Last() == "exec")
+            return "";
+        }
+        private static string FileName(string path)
+        {
+            var name = path.Split('/', '\\').Last();
+            return Regex.IsMatch(name, @"^[\p{L}\p{N}_.@+() -]{1,100}$") ? Json.Clean(name, 48) : "";
+        }
+        private static string FileNames(IEnumerable<string> paths, bool link = false)
+        {
+            var names = paths.Select(path => new { Path = path, Name = FileName(path) }).Where(file => file.Name != "")
+                .GroupBy(file => file.Name, StringComparer.OrdinalIgnoreCase).Select(group => group.First()).ToList();
+            if (names.Count == 0) return "";
+            return String.Join(", ", names.Take(3).Select(file => link ? "[" + file.Name + "](<" + file.Path + ">)" : file.Name)) +
+                (names.Count > 3 ? " +" + (names.Count - 3) + " more" : "");
+        }
+        private static string ChangeLabel(Dictionary<string, object> item, bool finished, bool failed, bool link = false)
+        {
+            var changes = Json.Map(item, "changes");
+            var names = changes == null ? "" : FileNames(changes.Keys, link);
+            if (names == "") return failed ? "File update failed" : "";
+            if (failed) return "Could not update " + names;
+            if (!finished) return "Editing " + names;
+            var actions = changes.Values.OfType<Dictionary<string, object>>()
+                .Select(change => Json.Text(change, "type").ToLowerInvariant()).Distinct().ToList();
+            if (actions.Count == 1)
             {
-                // Only recognize explicit nested tool names; never evaluate wrapper JavaScript.
-                var names = Regex.Matches(Json.Text(payload, "input"), @"\btools\.([A-Za-z_][A-Za-z0-9_]*)\s*\(")
-                    .Cast<Match>().Select(match => match.Groups[1].Value).Distinct().ToList();
-                if (names.Count == 1) return ToolLabel(names[0]);
-                if (names.Count > 1) return "Running " + names.Count + " tool calls";
+                if (actions[0] == "add") return "Added " + names;
+                if (actions[0] == "delete") return "Removed " + names;
             }
-            return ToolLabel(name);
+            return "Updated " + names;
         }
         private static void ItemActivity(SessionFile file, Dictionary<string, object> item, bool finished, DateTime at)
         {
@@ -771,25 +850,43 @@ namespace Orbit
             var status = Json.Text(item, "status");
             var failed = status == "failed" || status == "declined";
             string label;
+            string detail = null;
+            var fileRead = false;
             if (type == "CommandExecution")
             {
                 int code;
                 var hasCode = Int32.TryParse(Convert.ToString(Json.Get(item, "exit_code"), CultureInfo.InvariantCulture), out code);
                 failed |= hasCode && code != 0;
-                var activity = CommandActivity(Json.Get(item, "command"));
-                label = failed ? (activity == "checks" ? "Checks failed" : activity == "build" ? "Build failed" : "Command failed") + (hasCode ? " (exit " + code + ")" : "") : CommandLabel(activity, finished);
+                var ended = finished || failed;
+                var output = Json.Text(item, "aggregated_output");
+                // An absent exit status cannot substantiate a successful test or build.
+                if (ended && !failed && !hasCode && status != "completed") return;
+                label = CommandLabel(Json.Get(item, "command"), ended, failed, output);
+                if (label == "")
+                {
+                    var reads = (Json.Get(item, "parsed_cmd") as object[] ?? new object[0]).OfType<Dictionary<string, object>>()
+                        .Where(command => Json.Text(command, "type") == "read");
+                    var paths = reads.Select(command => Json.Text(command, "path")).ToList();
+                    var files = FileNames(paths);
+                    if (files != "" && !failed)
+                    {
+                        var verb = finished ? "Read " : "Reading ";
+                        label = verb + files;
+                        detail = verb + FileNames(paths, true);
+                        fileRead = true;
+                    }
+                }
             }
             else if (type == "FileChange")
             {
-                var changes = Json.Map(item, "changes");
-                var count = changes == null ? 0 : changes.Count;
-                var files = count == 0 ? "project files" : count + " project file" + (count == 1 ? "" : "s");
-                label = failed ? "File update failed" : (finished && status == "completed" ? "Updated " : "Updating ") + files;
+                label = ChangeLabel(item, finished && status == "completed", failed);
+                detail = ChangeLabel(item, finished && status == "completed", failed, true);
             }
             else return; // No reasoning, prompts, command output, diffs, or unknown item contents.
-            if (finished) file.LastActivity = label;
+            if (label == "") return;
+            if (finished || failed) file.LastActivity = label;
             if (file.Agent.Ended == DateTime.MinValue && file.Agent.State != "attention" && file.Agent.State != "waiting") file.Agent.Task = label;
-            Record(file.Agent, label, at, failed ? "error" : "working");
+            if (finished || failed) Record(file.Agent, label, at, failed ? "error" : "working", detail, fileRead);
         }
         private void ApplySession(SessionFile file, Dictionary<string, object> row)
         {
@@ -802,7 +899,7 @@ namespace Orbit
             var kind = Json.Text(payload, "type");
             if (type == "event_msg")
             {
-                if (kind == "task_started" || kind == "turn_started") { ClearPending(file); agent.Started = at; agent.Ended = DateTime.MinValue; agent.State = "working"; agent.Task = "Starting work"; Record(agent, "Started working", at); }
+                if (kind == "task_started" || kind == "turn_started") { ClearPending(file); file.LastActivity = ""; agent.Result = ""; agent.Started = at; agent.Ended = DateTime.MinValue; agent.State = "working"; agent.Task = "Starting work"; Record(agent, "Started working", at); }
                 else if (kind == "task_complete" || kind == "task_completed" || kind == "turn_complete") { ClearPending(file); agent.State = "completed"; agent.Ended = at; agent.Task = "Work complete"; Record(agent, "Completed the task", at); }
                 else if (kind == "turn_aborted") { ClearPending(file); agent.State = "idle"; agent.Ended = at; agent.Task = "Task interrupted"; Record(agent, agent.Task, at); }
                 else if (kind == "error") { ClearPending(file); agent.State = "error"; agent.Task = "A task encountered an error"; agent.Ended = at; Record(agent, agent.Task, at); }
@@ -843,9 +940,9 @@ namespace Orbit
                     // Bound ordinary calls without dropping unanswered input/approval requests.
                     if (file.Tools.Count > 512)
                         foreach (var key in file.Tools.Keys.Where(key => !file.AttentionCalls.ContainsKey(key)).Take(file.Tools.Count - 512).ToList()) file.Tools.Remove(key);
-                    file.LastActivity = "";
                     PendingState(file, name.Contains("wait") ? "waiting" : "working", label);
-                    agent.Updated = at; Record(agent, agent.Task, at);
+                    agent.Updated = at;
+                    if (agent.State == "attention") Record(agent, agent.Task, at);
                 }
                 else if (kind == "function_call_output" || kind == "custom_tool_call_output")
                 {
@@ -873,7 +970,7 @@ namespace Orbit
             if (!customAgents.TryGetValue(id, out agent))
             {
                 if (customAgents.Count >= 200) { var oldest = customAgents.Values.Where(a => a.State == "completed" || a.State == "idle").OrderBy(a => a.Updated).FirstOrDefault(); if (oldest == null) return; customAgents.Remove(oldest.Id); }
-                agent = new Agent { Id = id, Name = "Agent", Task = "Starting work", Role = "builder", State = "working", Started = at, Updated = at };
+                agent = new Agent { Id = id, Name = "Agent", Workspace = workspace, Task = "Starting work", Role = "builder", State = "working", Started = at, Updated = at };
                 customAgents[id] = agent;
             }
             if (at < agent.Updated) return;
