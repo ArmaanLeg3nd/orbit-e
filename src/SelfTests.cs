@@ -333,6 +333,7 @@ namespace OrbitEvolved
                 }
                 CheckProjectCatalog(root);
                 CheckQualityOfLifeCatalog(root);
+                CheckCompletionPill(root);
                 CheckQualityOfLifeGraph(root);
                 report.Add("\n" + count + " checks passed.\nArtifacts: " + root);
             }
@@ -511,6 +512,93 @@ namespace OrbitEvolved
             clock = finishedAt.AddMinutes(2);
             Check(catalog.Poll(null).ActiveChatEntries.All(entry => entry.Chat.Id != inputId),
                 "Done expires two minutes after the recorded completion");
+        }
+
+        private static void CheckCompletionPill(string root)
+        {
+            var home = Path.Combine(root, "completion-pill");
+            var folder = Directory.CreateDirectory(Path.Combine(home, "sessions")).FullName;
+            var path = Path.Combine(folder, "run.jsonl");
+            var id = "01a00000-0000-7000-8000-000000000025";
+            var finished = DateTime.UtcNow.AddSeconds(-2);
+            var started = finished.AddMinutes(-1);
+            WriteSession(path, id, "", id, root, "cli", started);
+            var child = Path.Combine(folder, "child.jsonl");
+            WriteSession(child, "completion-child", id, id, root, "cli", started.AddSeconds(5));
+            AppendJson(Path.Combine(home, "session_index.jsonl"), new { id = id, thread_name = "Finish the parser" });
+            WritePublicResult(path, finished, "Parser ready.");
+            var clock = finished.AddSeconds(1);
+            var catalog = new ChatCatalog(home, null, root, () => clock);
+            var snapshot = catalog.Poll(null);
+            var done = snapshot.ActiveChatEntries.Single();
+            Check(done.Activity == ChatActivity.Done, "An older child status cannot keep a finished lead active");
+            var state = new ChatPillState();
+            state.Observe(snapshot);
+            clock = finished.AddMinutes(3);
+            var expired = catalog.Poll(null);
+            Check(expired.ActiveChatEntries.Count == 0, "An old completion leaves the Active list");
+            state.Observe(expired);
+            Check(state.Target == done, "A displayed Done pill holds past the Active list timeout");
+            Check(state.Acknowledge(done) && state.Target == null && state.IsAcknowledged(done),
+                "Opening the Done pill acknowledges its turn immediately");
+            var updatedTimestamp = new ActiveChatEntry { Chat = done.Chat, Activity = ChatActivity.Done,
+                StartedAt = started, CompletedAt = finished.AddSeconds(4) };
+            snapshot.ActiveChatEntries = new List<ActiveChatEntry> { updatedTimestamp };
+            state.Observe(snapshot);
+            Check(state.Target == null, "A follow-up completion record cannot revive an acknowledged turn");
+            var nextRun = new ActiveChatEntry { Chat = done.Chat, Activity = ChatActivity.Done,
+                StartedAt = finished.AddMinutes(1), CompletedAt = finished.AddMinutes(2) };
+            snapshot.ActiveChatEntries = new List<ActiveChatEntry> { nextRun };
+            state.Observe(snapshot);
+            Check(state.Target == nextRun, "A later turn in the same chat gets its own Done notification");
+            var newChat = new ChatSummary { Id = "new-work" };
+            snapshot.ActiveChatEntries.Insert(0, new ActiveChatEntry { Chat = newChat, Activity = ChatActivity.Working });
+            state.Observe(snapshot);
+            Check(state.Target.Chat == newChat, "New work replaces the Done pill");
+            snapshot.ActiveChatEntries.RemoveAt(0);
+            state.Observe(snapshot);
+            Check(state.Target == null, "A superseded completion does not resurface");
+
+            using (var signal = new EventWaitHandle(false, EventResetMode.AutoReset))
+            {
+                var options = new Options(new[] { "--workspace", root, "--all-projects" }) { CatalogHome = home };
+                var window = new Widget(options, signal).Window;
+                try
+                {
+                    window.Show(); Pump(550);
+                    Press(window, "CollapseButton"); Pump(450);
+                    var title = (TextBlock)window.FindName("PillTitle");
+                    var result = (TextBlock)window.FindName("PillSubtitle");
+                    Check(title.Text == "Done" && result.Text == "Parser ready.",
+                        "The collapsed widget displays Done with the completed chat result");
+                    Render(window, Path.Combine(root, "done-pill.png"));
+                    Press(window, "ExpandButton"); Pump(700);
+                    Check(((TextBlock)window.FindName("ProjectLabel")).Text == "Finish the parser",
+                        "Opening Done jumps into the completed chat");
+                    Press(window, "CollapseButton"); Pump(1900);
+                    Check(title.Text == "No active chats",
+                        "Collapsing after opening Done returns to idle across a background poll");
+                    Press(window, "ExpandButton"); Pump(500);
+                    var rows = (TreeView)window.FindName("AgentTreeView");
+                    Check(rows.Items.Count == 0 && ((FrameworkElement)window.FindName("CatalogTools")).IsVisible,
+                        "The acknowledged chat is gone from Active when the idle pill opens");
+                    Press(window, "CollapseButton"); Pump(450);
+                    var restart = DateTime.UtcNow;
+                    AppendJson(path, new { timestamp = restart.ToString("o"), type = "event_msg", payload = new { type = "task_started" } });
+                    WritePublicResult(path, restart.AddMilliseconds(10), "Second result ready.");
+                    Pump(2200);
+                    Check(title.Text == "Done" && result.Text == "Second result ready.",
+                        "The widget shows a new completion from the same chat");
+                }
+                finally { window.Close(); }
+            }
+        }
+
+        private static void WritePublicResult(string path, DateTime at, string content)
+        {
+            AppendJson(path, new { timestamp = at.ToString("o"), type = "event_msg", payload = new {
+                type = "item_completed", item = new { type = "AgentMessage", phase = "final_answer", content = content }
+            } });
         }
 
         private static void CheckQualityOfLifeGraph(string root)

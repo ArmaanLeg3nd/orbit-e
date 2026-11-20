@@ -23,6 +23,7 @@ namespace OrbitEvolved
         public string Update;
         public int WorkingAgents;
         internal ChatActivity Activity;
+        internal DateTime StartedAt;
         internal DateTime CompletedAt;
         internal bool NeedsAttention { get { return Activity == ChatActivity.Input || Activity == ChatActivity.Error; } }
         public string Status
@@ -129,9 +130,9 @@ namespace OrbitEvolved
                 var known = observedActive.Contains(item.Id);
                 var lead = detail.Agents.FirstOrDefault(agent => agent.Id == item.Id);
                 var completedAt = lead != null && lead.State == "completed" ? lead.Ended : DateTime.MinValue;
-                var activeAgents = detail.Agents.Where(agent => agent.Updated >= cutoff ||
-                    (known && agent.Updated >= completedAt &&
-                        (agent.State == "attention" || agent.State == "waiting" || agent.QuietUnfinished))).ToList();
+                var activeAgents = detail.Agents.Where(agent => agent.Updated >= completedAt &&
+                    (agent.Updated >= cutoff ||
+                        (known && (agent.State == "attention" || agent.State == "waiting" || agent.QuietUnfinished)))).ToList();
                 var working = activeAgents.Count(agent => agent.State == "working");
                 var attention = activeAgents.Any(agent => agent.State == "attention");
                 var failed = activeAgents.Any(agent => agent.State == "error");
@@ -149,6 +150,7 @@ namespace OrbitEvolved
                 listing.ActiveChatEntries.Add(new ActiveChatEntry
                 {
                     Chat = item, WorkingAgents = working, Activity = status, CompletedAt = completedAt,
+                    StartedAt = lead == null ? DateTime.MinValue : lead.Started,
                     Update = LatestUpdate(lead, detail.Agents, activeAgents, status)
                 });
             }
