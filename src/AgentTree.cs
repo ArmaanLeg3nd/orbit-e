@@ -13,6 +13,8 @@ namespace OrbitEvolved
         public Agent Agent { get; set; }
         public string Caption { get; set; }
         public string Description { get; set; }
+        private string chatUpdate;
+        public string ChatUpdate { get { return chatUpdate ?? ""; } set { chatUpdate = value; } }
         public string GroupHint { get; set; }
         public ChatSummary Chat { get; set; }
         public bool CanOpenInCodex { get { return Chat != null && CodexLink.ForChat(Chat.Id) != null; } }
@@ -30,7 +32,15 @@ namespace OrbitEvolved
         public string Subtitle { get { return Kind == "agent" ? ActivityLinks.PlainSummary(Agent.ActivityDetail) : ""; } }
         public string Status { get { return Kind == "agent" ? Agent.StatusLabel : ""; } }
         public System.Windows.Media.Brush StatusBrush { get { return Kind == "agent" ? Agent.AccentBrush : Palette.State("idle"); } }
-        public string AccessibleName { get { return Kind == "agent" ? Agent.AccessibleName : Title; } }
+        public string AccessibleName
+        {
+            get
+            {
+                if (Kind == "agent") return Agent.AccessibleName;
+                return Kind == "chat" && !String.IsNullOrEmpty(Description)
+                    ? Title + ", " + Description + (ChatUpdate == "" ? "" : ", " + ChatUpdate) : Title;
+            }
+        }
         public string Hint { get { return Kind == "agent" ? Agent.AccessibleName : GroupHint ?? Title; } }
         public event PropertyChangedEventHandler PropertyChanged;
         public void Notify() { if (PropertyChanged != null) PropertyChanged(this, new PropertyChangedEventArgs("")); }
@@ -91,8 +101,9 @@ namespace OrbitEvolved
                 row.Chat = chat;
                 row.Caption = chat.Title;
                 row.Description = entry.Status + " · " + chat.ProjectName;
-                row.ChatNeedsAttention = entry.Priority <= 1;
-                row.GroupHint = row.Caption + "\n" + row.Description;
+                row.ChatNeedsAttention = entry.NeedsAttention;
+                row.ChatUpdate = entry.Update;
+                row.GroupHint = row.Caption + "\n" + row.Description + (row.ChatUpdate == "" ? "" : "\n" + row.ChatUpdate);
                 row.Notify();
                 rows.Add(row);
             }

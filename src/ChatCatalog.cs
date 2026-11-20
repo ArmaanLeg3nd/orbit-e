@@ -15,12 +15,31 @@ namespace OrbitEvolved
         public bool Archived;
     }
 
+    internal enum ChatActivity { Input, Error, Working, Waiting, Quiet, Done }
+
     public sealed class ActiveChatEntry
     {
         public ChatSummary Chat;
-        public string Status;
-        public int Priority;
+        public string Update;
         public int WorkingAgents;
+        internal ChatActivity Activity;
+        internal DateTime CompletedAt;
+        internal bool NeedsAttention { get { return Activity == ChatActivity.Input || Activity == ChatActivity.Error; } }
+        public string Status
+        {
+            get
+            {
+                switch (Activity)
+                {
+                    case ChatActivity.Input: return "Needs your input";
+                    case ChatActivity.Error: return "Needs attention";
+                    case ChatActivity.Working: return "Working";
+                    case ChatActivity.Waiting: return "Waiting";
+                    case ChatActivity.Quiet: return "No recent activity";
+                    default: return "Done";
+                }
+            }
+        }
     }
 
     internal sealed class ChatCatalog
@@ -53,15 +72,18 @@ namespace OrbitEvolved
         private readonly HashSet<string> observedActive = new HashSet<string>(StringComparer.Ordinal);
         private List<ChatSummary> chats = new List<ChatSummary>();
         private DateTime nextScan;
+        private readonly Func<DateTime> utcNow;
+        private static readonly TimeSpan CompletedVisibility = TimeSpan.FromMinutes(2);
 
         public ChatCatalog(string home, string activeDirectory)
             : this(home, activeDirectory, Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Codex"))
         {
         }
 
-        internal ChatCatalog(string home, string activeDirectory, string generatedWorkspaces)
+        internal ChatCatalog(string home, string activeDirectory, string generatedWorkspaces, Func<DateTime> utcNow = null)
         {
             this.home = home;
+            this.utcNow = utcNow ?? (() => DateTime.UtcNow);
             this.generatedWorkspaces = generatedWorkspaces;
             active = activeDirectory ?? Path.Combine(home, "sessions");
             archived = activeDirectory == null ? Path.Combine(home, "archived_sessions") : null;
@@ -71,10 +93,11 @@ namespace OrbitEvolved
 
         internal Snapshot Poll(string selected, string retain)
         {
-            if (DateTime.UtcNow >= nextScan)
+            var now = utcNow();
+            if (now >= nextScan)
             {
                 Scan();
-                nextScan = DateTime.UtcNow.AddSeconds(5);
+                nextScan = now.AddSeconds(5);
             }
             var chat = chats.FirstOrDefault(item => item.Id == selected);
             if (chat != null)
@@ -91,7 +114,7 @@ namespace OrbitEvolved
                 Source = chats.Count == 1 ? "1 local chat" : chats.Count + " local chats",
                 Problem = chats.Count == 0 ? "Local Codex chats will appear here when their session files are available." : ""
             };
-            var cutoff = DateTime.UtcNow.AddMinutes(-5);
+            var cutoff = now.AddMinutes(-5);
             var recent = chats.Where(item => !item.Archived &&
                 (observedActive.Contains(item.Id) || teams[item.Id].Any(row => row.LastActivity >= cutoff)))
                 .OrderByDescending(item => teams[item.Id].Max(row => row.LastActivity)).ToList();
@@ -114,30 +137,51 @@ namespace OrbitEvolved
                 var failed = activeAgents.Any(agent => agent.State == "error");
                 var waiting = activeAgents.Any(agent => agent.State == "waiting");
                 var quiet = known && activeAgents.Any(agent => agent.QuietUnfinished);
-                if (!attention && !failed && working == 0 && !waiting && !quiet)
+                var status = attention ? ChatActivity.Input : failed ? ChatActivity.Error :
+                    working > 0 ? ChatActivity.Working : waiting ? ChatActivity.Waiting : quiet ? ChatActivity.Quiet : ChatActivity.Done;
+                if (status == ChatActivity.Done)
                 {
                     observedActive.Remove(item.Id);
-                    continue;
+                    if (completedAt <= now - CompletedVisibility || completedAt > now) continue;
                 }
-                observedActive.Add(item.Id);
+                else observedActive.Add(item.Id);
+
                 listing.ActiveChatEntries.Add(new ActiveChatEntry
                 {
-                    Chat = item,
-                    WorkingAgents = working,
-                    Priority = attention ? 0 : failed ? 1 : working > 0 ? 2 : waiting ? 3 : 4,
-                    Status = attention ? "Needs your input" : failed ? "Needs attention" :
-                        working > 0 ? "Working" : waiting ? "Waiting" : "No recent activity"
+                    Chat = item, WorkingAgents = working, Activity = status, CompletedAt = completedAt,
+                    Update = LatestUpdate(lead, detail.Agents, activeAgents, status)
                 });
             }
-            listing.ActiveChatEntries = listing.ActiveChatEntries.OrderBy(entry => entry.Priority).ToList();
-            var first = listing.ActiveChatEntries.FirstOrDefault();
-            if (first != null)
-            {
-                listing.ActiveChat = first.Chat;
-                listing.ActiveChatStatus = first.Status;
-                listing.WorkingAgents = listing.ActiveChatEntries.Sum(entry => entry.WorkingAgents);
-            }
+            listing.ActiveChatEntries = listing.ActiveChatEntries.OrderBy(entry => entry.Activity)
+                .ThenByDescending(entry => entry.Activity == ChatActivity.Done ? entry.CompletedAt : DateTime.MinValue).ToList();
+            listing.WorkingAgents = listing.ActiveChatEntries.Sum(entry => entry.WorkingAgents);
             return listing;
+        }
+
+        private static string LatestUpdate(Agent lead, List<Agent> team, List<Agent> active, ChatActivity status)
+        {
+            if (status == ChatActivity.Input)
+            {
+                var request = active.Where(agent => agent.State == "attention").OrderByDescending(agent => agent.Updated).First();
+                return AgentUpdate(request, request.Task);
+            }
+            if (status == ChatActivity.Done && !String.IsNullOrWhiteSpace(lead.Result))
+                return AgentUpdate(lead, lead.ActivityDetail);
+
+            var latest = team.SelectMany(agent => agent.Events.Where(entry => !entry.IsLifecycle && !entry.FileRead &&
+                    entry.At >= agent.Started && (lead == null || entry.At >= lead.Started) &&
+                    (status != ChatActivity.Done || entry.At <= lead.Ended) &&
+                    entry.Text != "Waiting for your input in Codex" && entry.Text != "Approval requested in Codex")
+                .Select(entry => new { Agent = agent, Event = entry }))
+                .OrderByDescending(item => item.Event.At).FirstOrDefault();
+            return latest == null ? "" : AgentUpdate(latest.Agent, latest.Event.Body);
+        }
+
+        private static string AgentUpdate(Agent agent, string body)
+        {
+            var summary = ActivityLinks.PlainSummary(body);
+            if (summary == "" || agent.IsRoot) return summary;
+            return Json.Clean(agent.DisplayName.TrimStart('/') + " · " + summary, 180);
         }
 
         private Snapshot ReadChat(ChatSummary chat)

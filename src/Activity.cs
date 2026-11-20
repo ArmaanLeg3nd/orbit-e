@@ -138,10 +138,12 @@ namespace OrbitEvolved
         public List<ActivityEvent> Events = new List<ActivityEvent>();
         public List<SessionSummary> Sessions = new List<SessionSummary>();
         public List<ChatSummary> Chats;
-        public ChatSummary ActiveChat;
-        public string ActiveChatStatus;
         public List<ActiveChatEntry> ActiveChatEntries;
-        public int ActiveChats { get { return ActiveChatEntries == null ? 0 : ActiveChatEntries.Count; } }
+        public ChatSummary ActiveChat
+        {
+            get { var first = ActiveChatEntries == null ? null : ActiveChatEntries.FirstOrDefault(entry => entry.Activity != ChatActivity.Done); return first == null ? null : first.Chat; }
+        }
+        public int ActiveChats { get { return ActiveChatEntries == null ? 0 : ActiveChatEntries.Count(entry => entry.Activity != ChatActivity.Done); } }
         public int WorkingAgents;
         public string Project = "";
         public string Source = "Watching local activity";

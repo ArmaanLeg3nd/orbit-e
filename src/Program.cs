@@ -97,7 +97,7 @@ namespace OrbitEvolved
         private readonly AgentTree catalogTree = new AgentTree();
         private List<ChatSummary> displayedCatalog;
         private readonly AgentTree activeCatalog = new AgentTree();
-        private bool activeOnly;
+        private bool activeOnly = true;
         private string selectedChat;
         private string openGraphForChat;
         private AgentGraphWindow graph;
@@ -330,17 +330,9 @@ namespace OrbitEvolved
                 Text("ProjectLabel", snapshot.Project);
                 Text("SummaryTitle", snapshot.ActiveChats > 0
                     ? snapshot.ActiveChats + (snapshot.ActiveChats == 1 ? " active chat" : " active chats")
-                    : catalogTree.Roots.Count == 1 ? "1 project group" : catalogTree.Roots.Count + " project groups");
+                    : activeOnly ? "Watching local chats" : catalogTree.Roots.Count == 1 ? "1 project group" : catalogTree.Roots.Count + " project groups");
                 Text("SourceLabel", snapshot.Source);
-                var target = snapshot.ActiveChat;
-                var pillTitle = target == null ? "No active chats" : snapshot.ActiveChatStatus;
-                if (target != null && snapshot.ActiveChatStatus == "Working")
-                    pillTitle = snapshot.WorkingAgents == 1 ? "1 agent working" : snapshot.WorkingAgents + " agents working";
-                Text("PillTitle", pillTitle);
-                Text("PillSubtitle", target == null ? snapshot.Project : target.Title);
-                System.Windows.Automation.AutomationProperties.SetName(Find<Button>("ExpandButton"),
-                    target == null ? "Open Codex projects" : "Open " + target.Title + ", " + pillTitle);
-                tray.Text = Json.Clean(Product.Name + " · " + pillTitle, 63);
+                UpdateCatalogPill(snapshot);
                 return;
             }
             treeView.ItemsSource = tree.Roots;
@@ -395,6 +387,40 @@ namespace OrbitEvolved
             else if (graph != null && graphChatId == selectedChat) UpdateGraph(snapshot);
             tray.Text = Json.Clean(Product.Name + " · " + (preview ? "Preview · " : "") + title, 63);
         }
+        private void UpdateCatalogPill(Snapshot snapshot)
+        {
+            var entries = snapshot.ActiveChatEntries;
+            var target = entries.FirstOrDefault();
+            var title = target == null ? "No active chats" : target.Status;
+            var subtitle = target == null ? snapshot.Project : target.Chat.Title;
+            var accessibleStatus = title;
+            if (snapshot.ActiveChats > 1)
+            {
+                var parts = new[] {
+                    StatusCount(entries.Count(entry => entry.NeedsAttention), "needs you", "need you"),
+                    StatusCount(entries.Count(entry => entry.Activity == ChatActivity.Working), "working", "working"),
+                    StatusCount(entries.Count(entry => entry.Activity == ChatActivity.Waiting), "waiting", "waiting"),
+                    StatusCount(entries.Count(entry => entry.Activity == ChatActivity.Quiet), "quiet", "quiet")
+                }.Where(part => part != "").ToList();
+                title = String.Join(" · ", parts.Take(2));
+                subtitle = parts.Count > 2 ? String.Join(" · ", parts.Skip(2)) : snapshot.ActiveChats + " active chats";
+                accessibleStatus = String.Join(", ", parts);
+            }
+            else if (target != null && target.Activity == ChatActivity.Working)
+            {
+                title = StatusCount(target.WorkingAgents, "agent working", "agents working");
+                accessibleStatus = title;
+            }
+            Text("PillTitle", title);
+            Text("PillSubtitle", subtitle);
+            System.Windows.Automation.AutomationProperties.SetName(Find<Button>("ExpandButton"),
+                target == null ? "Open Codex projects" : "Open " + target.Chat.Title + ", " + accessibleStatus);
+            tray.Text = Json.Clean(Product.Name + " · " + title, 63);
+        }
+        private static string StatusCount(int count, string singular, string plural)
+        {
+            return count == 0 ? "" : count + " " + (count == 1 ? singular : plural);
+        }
         private void RefreshCatalog(Snapshot snapshot)
         {
             if (snapshot.Chats == null) return;
@@ -405,9 +431,9 @@ namespace OrbitEvolved
             Find<Button>("ActiveChatsButton").Background = Palette.Color(activeOnly ? "#30FFFFFF" : "#0CFFFFFF");
             Find<Button>("ActiveChatsButton").Content = snapshot.ActiveChats > 0 ? "Active (" + snapshot.ActiveChats + ")" : "Active";
             System.Windows.Automation.AutomationProperties.SetName(treeView, activeOnly ? "Active chats" : "Codex projects and chats");
-            Text("EmptyHeading", activeOnly ? "No active chats" : "No local chats yet");
-            Text("EmptyDescription", activeOnly ? "" : snapshot.Problem);
-            Visible("PreviewButton", !activeOnly);
+            Text("EmptyHeading", activeOnly && snapshot.Chats.Count > 0 ? "No active chats" : "No local chats yet");
+            Text("EmptyDescription", snapshot.Problem);
+            Visible("PreviewButton", snapshot.Chats.Count == 0);
             Visible("EmptyState", activeOnly ? activeCatalog.Roots.Count == 0 : snapshot.Chats.Count == 0);
         }
         private void OpenInCodex(string id)
@@ -597,8 +623,11 @@ namespace OrbitEvolved
         }
         private void OpenFromPill()
         {
-            if (collapsed && selectedChat == null && current.Chats != null && current.ActiveChat != null)
-                SelectChat(current.ActiveChat.Id);
+            if (collapsed && selectedChat == null && current.Chats != null)
+            {
+                var target = current.ActiveChatEntries.FirstOrDefault();
+                if (target != null) SelectChat(target.Chat.Id);
+            }
             RequestExpand();
         }
         private void ShowWidget() { Window.Show(); RequestExpand(); Window.Activate(); Back(); }

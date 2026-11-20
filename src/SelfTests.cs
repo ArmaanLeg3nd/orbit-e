@@ -410,14 +410,28 @@ namespace OrbitEvolved
                 payload = new { type = "function_call", name = "functions.request_user_input", call_id = "ask" } });
             AppendJson(Path.Combine(folder, "waiting.jsonl"), new { timestamp = now.ToString("o"), type = "response_item",
                 payload = new { type = "function_call", name = "collaboration.wait_agent", call_id = "wait" } });
-            var catalog = new ChatCatalog(home, null);
+            var reviewerLog = Path.Combine(folder, "reviewer.jsonl");
+            WriteSession(reviewerLog, "qol-reviewer", workingId, workingId, projectB,
+                new { subagent = new { thread_spawn = new { agent_nickname = "Reviewer" } } }, now);
+            AppendJson(reviewerLog, new { timestamp = now.AddMilliseconds(50).ToString("o"), type = "event_msg", payload = new {
+                type = "agent_message", message = "Checking the **parser**."
+            } });
+            AppendJson(reviewerLog, new { timestamp = now.AddMilliseconds(100).ToString("o"), type = "event_msg", payload = new {
+                type = "item_completed", item = new { type = "CommandExecution", status = "completed",
+                    parsed_cmd = new[] { new { type = "read", path = Path.Combine(projectB, "routine.txt") } } }
+            } });
+            var clock = DateTime.UtcNow.AddSeconds(1);
+            var catalog = new ChatCatalog(home, null, root, () => clock);
             var active = catalog.Poll(null);
             Check(active.ActiveChatEntries.Select(entry => entry.Chat.Id).SequenceEqual(new[] { inputId, workingId, waitingId }) &&
                   active.ActiveChatEntries.Select(entry => entry.Status).SequenceEqual(new[] { "Needs your input", "Working", "Waiting" }) &&
                   active.ActiveChatEntries.Select(entry => entry.Chat.ProjectKey).Distinct().Count() == 2,
                 "Active chats span local projects, prioritize requests and exclude archives");
-            Check(active.ActiveChats == 3 && active.WorkingAgents == 1 && active.ActiveChat.Id == inputId,
-                "Active list and minimized status use the same live entries");
+            Check(active.ActiveChats == 3 && active.WorkingAgents == 2 && active.ActiveChat.Id == inputId,
+                "Active list prioritizes input and distinguishes counts of chats and agents");
+            Check(active.ActiveChatEntries.Single(entry => entry.Chat.Id == workingId).Update == "Reviewer · Checking the parser." &&
+                  active.ActiveChatEntries.Single(entry => entry.Chat.Id == inputId).Update == "Waiting for your input in Codex",
+                "Active updates identify the reporting agent, skip later routine reads, and surface pending input");
             Check(CodexLink.ForChat(null) == null && CodexLink.ForChat("https://invalid.example") == null &&
                   CodexLink.ForChat(workingId + "?other") == null,
                 "Codex links accept only a local chat UUID");
@@ -432,9 +446,19 @@ namespace OrbitEvolved
                 {
                     window.Show(); Pump(500);
                     var tree = (TreeView)window.FindName("AgentTreeView");
-                    Press(window, "ActiveChatsButton"); Pump(150);
                     Check(tree.Items.Cast<TreeNode>().Select(row => row.Chat.Id).SequenceEqual(new[] { inputId, workingId, waitingId }),
-                        "The native Active view shows all three chats in priority order");
+                        "The widget opens in Active and shows all three chats in priority order");
+                    Check(FindVisual<TextBlock>(tree, text => text.IsVisible && text.Text == "Reviewer · Checking the parser.") != null,
+                        "The active chat row renders its single meaningful update");
+                    Press(window, "CollapseButton"); Pump(450);
+                    Check(((TextBlock)window.FindName("PillTitle")).Text == "1 needs you · 1 working" &&
+                          ((TextBlock)window.FindName("PillSubtitle")).Text == "1 waiting",
+                        "The collapsed pill summarizes multiple chats by status and counts chats instead of agents");
+                    Render(window, Path.Combine(root, "active-overview-pill.png"));
+                    Press(window, "ExpandButton"); Pump(700);
+                    Check(((TextBlock)window.FindName("ProjectLabel")).Text == "Collect measurements",
+                        "The collapsed overview opens the chat that needs input first");
+                    Press(window, "SourceButton"); Pump(500);
                     var rowLink = FindVisual<Button>(tree, button => {
                         var chat = button.Tag as ChatSummary;
                         return button.IsVisible && chat != null && chat.Id == workingId && (string)button.CommandParameter == "codex";
@@ -471,11 +495,22 @@ namespace OrbitEvolved
             var workingLog = Path.Combine(folder, "working.jsonl");
             AppendJson(workingLog, new { timestamp = now.AddMinutes(-10).ToString("o"), type = "event_msg",
                 payload = new { type = "task_started" } });
+            AppendJson(reviewerLog, new { timestamp = now.AddMinutes(-10).ToString("o"), type = "event_msg",
+                payload = new { type = "task_started" } });
             Check(catalog.Poll(null).ActiveChatEntries.Single(entry => entry.Chat.Id == workingId).Status == "No recent activity",
                 "Previously observed silent work remains listed without an unverified Working claim");
-            AppendJson(input, new { timestamp = DateTime.UtcNow.ToString("o"), type = "event_msg", payload = new { type = "task_complete" } });
+            var finishedAt = DateTime.UtcNow;
+            AppendJson(input, new { timestamp = finishedAt.ToString("o"), type = "event_msg", payload = new { type = "item_completed",
+                item = new { type = "AgentMessage", phase = "final_answer", content = "Collected **12** measurements." } } });
+            clock = finishedAt.AddSeconds(1);
+            var finished = catalog.Poll(null);
+            Check(finished.ActiveChats == 2 && finished.ActiveChat.Id != inputId &&
+                  finished.ActiveChatEntries.Last().Chat.Id == inputId && finished.ActiveChatEntries.Last().Status == "Done" &&
+                  finished.ActiveChatEntries.Last().Update == "Collected 12 measurements.",
+                "A completed chat briefly stays as Done with its public result but no longer counts as active");
+            clock = finishedAt.AddMinutes(2);
             Check(catalog.Poll(null).ActiveChatEntries.All(entry => entry.Chat.Id != inputId),
-                "A completed chat drops out of the Active view after refresh");
+                "Done expires two minutes after the recorded completion");
         }
 
         private static void CheckQualityOfLifeGraph(string root)
@@ -537,7 +572,7 @@ namespace OrbitEvolved
             var first = Path.Combine(root, "Field Notes");
             var second = Path.Combine(root, "Weather Station");
             Directory.CreateDirectory(Path.Combine(second, ".git"));
-            var now = DateTime.UtcNow;
+            var now = DateTime.UtcNow.AddMinutes(-3);
             WriteSession(Path.Combine(old, "first.jsonl"), "catalog-main", "", "", first, "cli", now);
             WriteSession(Path.Combine(recent, "child.jsonl"), "catalog-child", "catalog-main", "", second, "cli", now);
             var agentLog = Path.Combine(old, "first.jsonl");
@@ -590,8 +625,9 @@ namespace OrbitEvolved
                 var settings = new Options(new[] { "--workspace", root, "--all-projects" }) { CatalogHome = home };
                 var window = new Widget(settings, signal).Window;
                 window.Show(); Pump(500);
+                Press(window, "AllChatsButton"); Pump(150);
                 var tree = (TreeView)window.FindName("AgentTreeView");
-                Check(tree.Items.Count == 3, "Windows widget creates one row per project group");
+                Check(tree.Items.Count == 3, "All shows one row per project group");
                 Render(window, Path.Combine(root, "projects.png"));
                 var button = FindChatButton(tree, "catalog-main");
                 Check(button != null, "A chat in the projects view has a clickable row");

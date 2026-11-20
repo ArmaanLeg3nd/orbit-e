@@ -4,6 +4,7 @@
 
 - Added an optional Windows sign-in launch setting.
 - Added a cross-project Active view and shortcuts to Codex Desktop.
+- Opened the widget in Active by default, added a multi-chat summary in the collapsed pill, and surfaced one meaningful update per active or recently completed chat.
 - Added completed-branch folding and a clickable list of changed files by agent.
 - Renamed the app, executable, resources, and workspace settings directory for Orbit E(volved).
 
