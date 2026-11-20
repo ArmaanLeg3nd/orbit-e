@@ -25,8 +25,11 @@ namespace Orbit
         public bool Demo;
         public bool Test;
         public bool AllProjects;
+        public bool RefreshCloudOnLaunch;
+        public string CodexCli;
         public string Workspace;
         internal string CatalogHome = ActivityReader.CodexHome();
+        internal Func<List<ChatSummary>> CloudFetcher;
         public string Session = "";
         public string Events = "";
         public string Sessions;
@@ -41,6 +44,8 @@ namespace Orbit
                 if (args[i] == "--demo") Demo = true;
                 else if (args[i] == "--live") Demo = false;
                 else if (args[i] == "--all-projects") allProjectsRequested = true;
+                else if (args[i] == "--cloud") RefreshCloudOnLaunch = true;
+                else if (args[i] == "--codex-cli" && i + 1 < args.Length) CodexCli = Path.GetFullPath(args[++i]);
                 else if (args[i] == "--self-test") Test = true;
                 else if (args[i] == "--workspace" && i + 1 < args.Length) { Workspace = Path.GetFullPath(args[++i]); workspaceSelected = true; }
                 else if (args[i] == "--session" && i + 1 < args.Length) Session = args[++i];
@@ -94,6 +99,12 @@ namespace Orbit
         private readonly AgentTree tree = new AgentTree();
         private readonly AgentTree catalogTree = new AgentTree();
         private List<ChatSummary> displayedCatalog;
+        private List<ChatSummary> displayedCloud;
+        private List<ChatSummary> cloudChats = new List<ChatSummary>();
+        private ChatSummary cloudTask;
+        private bool loadingCloud;
+        private string cloudStatus = "";
+        private string cloudProblem = "";
         private string selectedChat;
         private AgentGraphWindow graph;
         private string graphChatId;
@@ -136,13 +147,21 @@ namespace Orbit
             {
                 var button = e.OriginalSource as Button;
                 if (button != null && button.Tag is Agent) OpenDetail(((Agent)button.Tag).Id);
-                if (button != null && button.Tag is ChatSummary) SelectChat(((ChatSummary)button.Tag).Id);
+                var chat = button == null ? null : button.Tag as ChatSummary;
+                if (chat != null)
+                {
+                    if (chat.IsCloud) OpenCloudTask(chat);
+                    else SelectChat(chat.Id);
+                }
             }));
             Click("CollapseButton", ToggleCollapsed);
             Click("ExpandButton", delegate { if (!dragMoved) OpenFromPill(); });
             Click("SettingsButton", ShowSettings);
             Click("SourceButton", delegate { if (preview) SetPreview(false); else if (selectedChat != null) SelectChat(null); else ShowSettings(); });
             Click("GraphButton", OpenGraph);
+            Click("CloudButton", RefreshCloud);
+            Click("CloudBackButton", Back);
+            Click("CloudLinkButton", OpenCloudInBrowser);
             Click("SettingsBackButton", Back);
             Click("BackButton", Back);
             Click("PreviewButton", delegate { SetPreview(true); Back(); });
@@ -180,7 +199,7 @@ namespace Orbit
             };
             Window.KeyDown += delegate(object sender, KeyEventArgs e)
             {
-                if (e.Key == Key.Escape) { if (Find<Grid>("SettingsView").Visibility == Visibility.Visible || detailId != null) Back(); else if (!collapsed) ToggleCollapsed(); e.Handled = true; }
+                if (e.Key == Key.Escape) { if (Find<Grid>("SettingsView").Visibility == Visibility.Visible || detailId != null || cloudTask != null) Back(); else if (!collapsed) ToggleCollapsed(); e.Handled = true; }
                 else if ((e.Key == Key.Enter || e.Key == Key.Space) && collapsed) { OpenFromPill(); e.Handled = true; }
                 else if (e.Key == Key.Q && Keyboard.Modifiers == ModifierKeys.Control) { Quit(); e.Handled = true; }
             };
@@ -191,6 +210,7 @@ namespace Orbit
                 PlaceCorner();
                 if (gentleMotion) { Window.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(350))); }
                 Poll();
+                if (!preview && options.RefreshCloudOnLaunch && catalog != null) RefreshCloud();
             };
             trayIcon = MakeIcon();
             Window.Icon = Imaging.CreateBitmapSourceFromHIcon(trayIcon.Handle, Int32Rect.Empty, System.Windows.Media.Imaging.BitmapSizeOptions.FromEmptyOptions());
@@ -235,14 +255,19 @@ namespace Orbit
         private void SetPreview(bool enabled)
         {
             if (preview != enabled && graph != null) graph.Close();
+            cloudTask = null;
+            Visible("CloudView", false);
             preview = enabled; selectedChat = null; generation++; detailId = null; attentionSeen.Clear(); agents.Clear(); tree.Clear();
             SetModeLabels(); Poll();
         }
         private void SelectChat(string id)
         {
+            cloudTask = null;
+            Visible("CloudView", false);
             selectedChat = id; generation++; detailId = null; attentionSeen.Clear(); agents.Clear(); tree.Clear();
             Find<TreeView>("AgentTreeView").ItemsSource = id == null ? catalogTree.Roots : tree.Roots;
             Visible("GraphButton", false);
+            Visible("CloudButton", false);
             Visible("EmptyState", false);
             Text("SummaryTitle", "Loading…");
             Text("SourceLabel", "Reading local activity…");
@@ -298,11 +323,13 @@ namespace Orbit
             if (snapshot.Chats != null)
             {
                 Visible("GraphButton", false);
+                Visible("CloudButton", true);
                 if (selectedChat != null) { selectedChat = null; SetModeLabels(); }
-                if (!Object.ReferenceEquals(displayedCatalog, snapshot.Chats))
+                if (!Object.ReferenceEquals(displayedCatalog, snapshot.Chats) || !Object.ReferenceEquals(displayedCloud, cloudChats))
                 {
-                    catalogTree.UpdateCatalog(snapshot.Chats);
+                    catalogTree.UpdateCatalog(cloudChats.Concat(snapshot.Chats));
                     displayedCatalog = snapshot.Chats;
+                    displayedCloud = cloudChats;
                 }
                 treeView.ItemsSource = catalogTree.Roots;
                 System.Windows.Automation.AutomationProperties.SetName(treeView, "Codex projects and chats");
@@ -310,7 +337,8 @@ namespace Orbit
                 Text("SummaryTitle", snapshot.ActiveChats > 0
                     ? snapshot.ActiveChats + (snapshot.ActiveChats == 1 ? " active chat" : " active chats")
                     : catalogTree.Roots.Count == 1 ? "1 project group" : catalogTree.Roots.Count + " project groups");
-                Text("SourceLabel", snapshot.Source);
+                Text("SourceLabel", snapshot.Source + (cloudStatus == "" ? "" : " · " + cloudStatus));
+                Find<TextBlock>("SourceLabel").ToolTip = cloudProblem == "" ? null : cloudProblem;
                 var target = snapshot.ActiveChat;
                 var pillTitle = target == null ? "No active chats" : snapshot.ActiveChatStatus;
                 if (target != null && snapshot.ActiveChatStatus == "Working")
@@ -322,10 +350,11 @@ namespace Orbit
                 tray.Text = Json.Clean("Orbit · " + pillTitle, 63);
                 Text("EmptyHeading", "No local chats yet");
                 Text("EmptyDescription", snapshot.Problem);
-                Visible("EmptyState", snapshot.Chats.Count == 0);
+                Visible("EmptyState", snapshot.Chats.Count == 0 && cloudChats.Count == 0);
                 return;
             }
             treeView.ItemsSource = tree.Roots;
+            Visible("CloudButton", false);
             Visible("GraphButton", preview || selectedChat != null || snapshot.Agents.Count > 0);
             System.Windows.Automation.AutomationProperties.SetName(Find<Button>("ExpandButton"), "Expand Orbit agent activity");
             System.Windows.Automation.AutomationProperties.SetName(treeView, "Session, agents, and activity tree");
@@ -369,6 +398,83 @@ namespace Orbit
             if (graph != null && graphChatId == selectedChat) UpdateGraph(snapshot);
             tray.Text = Json.Clean("Orbit · " + (preview ? "Preview · " : "") + title, 63);
         }
+        private void RefreshCloud()
+        {
+            if (loadingCloud) return;
+            loadingCloud = true;
+            cloudProblem = "";
+            cloudStatus = "Loading cloud…";
+            Find<Button>("CloudButton").IsEnabled = false;
+            if (current.Chats != null) Apply(current);
+            var fetch = options.CloudFetcher ?? delegate { return CloudTasks.Read(options.CodexCli); };
+            Task.Factory.StartNew(fetch).ContinueWith(task =>
+            {
+                if (closing || Window.Dispatcher.HasShutdownStarted) { var observed = task.Exception; return; }
+                Window.Dispatcher.BeginInvoke(new Action(delegate
+                {
+                    if (closing) { var observed = task.Exception; return; }
+                    loadingCloud = false;
+                    Find<Button>("CloudButton").IsEnabled = true;
+                    if (task.IsFaulted)
+                    {
+                        cloudStatus = cloudChats.Count == 0 ? "Cloud unavailable" : "Cloud refresh failed";
+                        var error = task.Exception.GetBaseException();
+                        cloudProblem = error is InvalidOperationException ? error.Message : "Could not load cloud chats from the Codex CLI.";
+                    }
+                    else
+                    {
+                        cloudChats = task.Result;
+                        cloudStatus = cloudChats.Count == 0 ? "No cloud chats" : cloudChats.Count + " cloud";
+                        if (cloudTask != null)
+                        {
+                            var updated = cloudChats.FirstOrDefault(chat => chat.Id == cloudTask.Id);
+                            if (updated != null) ShowCloudTask(updated);
+                            else Back();
+                        }
+                    }
+                    if (current.Chats != null) Apply(current);
+                }));
+            });
+        }
+
+        private void OpenCloudTask(ChatSummary chat)
+        {
+            ShowCloudTask(chat);
+            Visible("ExpandedView", false);
+            Visible("CloudView", true);
+            Find<Button>("CloudBackButton").Focus();
+            FadeIn(Find<Grid>("CloudView"));
+        }
+
+        private void ShowCloudTask(ChatSummary chat)
+        {
+            cloudTask = chat;
+            Text("CloudTitle", chat.Title);
+            Text("CloudStatus", chat.CloudStatus);
+            Text("CloudEnvironment", chat.CloudEnvironment);
+            Visible("CloudEnvironment", !String.IsNullOrEmpty(chat.CloudEnvironment));
+            var changes = new List<string>();
+            if (chat.FilesChanged.HasValue) changes.Add(chat.FilesChanged.Value + (chat.FilesChanged.Value == 1 ? " file changed" : " files changed"));
+            if (chat.LinesAdded.HasValue) changes.Add("+" + chat.LinesAdded.Value + " lines");
+            if (chat.LinesRemoved.HasValue) changes.Add("−" + chat.LinesRemoved.Value + " lines");
+            Text("CloudChanges", String.Join(" · ", changes));
+            Visible("CloudChanges", changes.Count > 0);
+            Text("CloudAttempts", chat.Attempts.HasValue ? chat.Attempts.Value + (chat.Attempts.Value == 1 ? " attempt" : " attempts") : "");
+            Visible("CloudAttempts", chat.Attempts.HasValue);
+            Visible("CloudLinkButton", chat.CloudUrl != null);
+        }
+
+        private void OpenCloudInBrowser()
+        {
+            var url = cloudTask == null || cloudTask.CloudUrl == null ? null : CloudTasks.BrowserUrl(cloudTask.CloudUrl.AbsoluteUri);
+            if (url == null) return;
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url.AbsoluteUri) { UseShellExecute = true });
+            }
+            catch (System.ComponentModel.Win32Exception) { Text("CloudStatus", "Could not open Codex in your browser"); }
+        }
+
         private void OpenGraph()
         {
             if (current.Chats != null) return;
@@ -436,11 +542,13 @@ namespace Orbit
         }
         private void Back()
         {
+            cloudTask = null; Visible("CloudView", false);
             detailId = null; Visible("ExpandedView", !collapsed); Visible("DetailView", false); Visible("SettingsView", false);
             Find<Button>("SettingsButton").Focus();
         }
         private void ShowSettings()
         {
+            cloudTask = null; Visible("CloudView", false);
             detailId = null; Visible("ExpandedView", false); Visible("DetailView", false); Visible("SettingsView", true);
             Find<Button>("SettingsBackButton").Focus(); FadeIn(Find<Grid>("SettingsView"));
         }
@@ -495,6 +603,7 @@ namespace Orbit
         {
             if (animating) return;
             collapsed = !collapsed; detailId = null;
+            cloudTask = null; Visible("CloudView", false);
             double width = collapsed ? 260 : 380;
             double height = collapsed ? 76 : 484;
             var area = WorkArea();

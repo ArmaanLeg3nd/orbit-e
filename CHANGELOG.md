@@ -3,6 +3,7 @@
 ## Orbit E — unreleased
 
 - Added a catalog of local and archived Codex chats, with project grouping, a projectless section, and setup-only duplicate filtering.
+- Added on-demand Codex Cloud task discovery through the signed-in CLI. Local and cloud rows have distinct icons, and cloud details link back to Codex.
 - Turned the collapsed widget into a live entry point to the active chat.
 - Added a centered glass workflow window with live agent status, recorded delegation arrows, a branch highlight, and an inspector for public results.
 - Added pan, zoom, fit-to-view, and links that jump to related agents.

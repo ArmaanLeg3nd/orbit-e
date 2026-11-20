@@ -1,12 +1,13 @@
 # Orbit E project direction
 
-Orbit E focuses on reading live and historical Codex workflows on Windows. The compact widget answers what is active. The workflow window answers who delegated the work and what each agent reported.
+Orbit E evolves as a separate Windows project. The compact widget answers what is active. The workflow window answers who delegated the work and what each agent reported.
 
 ## Priorities
 
 - Make large workflows easier to navigate. Evaluate branch folding and agent search against long, nested test sessions.
 - Make important outcomes easy to find in long chats. Explore jumping between recorded turns and public results.
 - Improve coverage of supported rollout formats with small, synthetic fixtures, especially for partially written logs and parent records that arrive after their children.
+- Extend cloud visibility as documented Codex interfaces expose more activity. Keep cloud task summaries distinct from recorded local workflows.
 - Test the window on multiple monitors and at different DPI settings. Keep the compact and graph views aligned on motion, keyboard navigation, and glass styling.
 
 Keep the existing native Windows build as the baseline. Evaluate new components against a concrete workflow need, their runtime footprint, and whether they duplicate something Orbit E can already do.

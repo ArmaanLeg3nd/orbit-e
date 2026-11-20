@@ -14,6 +14,7 @@ Orbit E is a Windows-native, local-first Codex workflow viewer. Keep the compact
 | Area | Files |
 | --- | --- |
 | Session catalog, local and archived discovery, project grouping, duplicate setup records | `src/ChatCatalog.cs` |
+| Codex Cloud task listing, CLI discovery, and browser link validation | `src/CloudTasks.cs` |
 | Incremental rollout parsing, agent state, public activity | `src/Activity.cs` |
 | Compact widget, tray, routing between views | `src/Program.cs`, `src/Widget.xaml`, `src/AgentTree.cs` |
 | Graph geometry, navigation, agent inspector | `src/AgentGraphLayout.cs`, `src/AgentGraphWindow.cs` |
@@ -24,6 +25,8 @@ Orbit E is a Windows-native, local-first Codex workflow viewer. Keep the compact
 
 - Use native WPF and the existing build script. Compare a proposed dependency against the built-in Windows and .NET capabilities before adding it.
 - Treat Codex rollouts as read-only input. Handle missing, partial, older, and unfamiliar records conservatively.
+- Keep cloud listing read-only through the signed-in Codex CLI. Represent cloud task metadata with its own source indicator and use recorded local activity for workflow graphs.
+- Leave browser sign-in, callbacks, and credential storage with the official Codex CLI. Keep auth files, keys, and real account task records out of the repository.
 - Draw delegation edges from recorded parent relationships. Keep partial data visible and distinguish unavailable links from recorded ones.
 - Surface public progress, results, and meaningful action summaries. Keep raw commands, private reasoning, and generic tool chatter out of the activity UI.
 - Preserve selection, expansion, and graph position during live refreshes. Honor the motion setting and keep the UI usable by keyboard.

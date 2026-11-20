@@ -1,4 +1,13 @@
 bin/
 artifacts/
 .orbit/
+.serena/
+.env
+.env.*
+!.env.example
+auth.json
+credentials.json
+*.pem
+*.pfx
+*.p12
 *.user

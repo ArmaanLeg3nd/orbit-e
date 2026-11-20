@@ -24,7 +24,14 @@ namespace Orbit
         public string Subtitle { get { return Kind == "agent" ? ActivityLinks.PlainSummary(Agent.ActivityDetail) : ""; } }
         public string Status { get { return Kind == "agent" ? Agent.StatusLabel : ""; } }
         public System.Windows.Media.Brush StatusBrush { get { return Kind == "agent" ? Agent.AccentBrush : Palette.State("idle"); } }
-        public string AccessibleName { get { return Kind == "agent" ? Agent.AccessibleName : Title; } }
+        public string AccessibleName
+        {
+            get
+            {
+                if (Kind == "agent") return Agent.AccessibleName;
+                return Chat == null ? Title : Title + (Chat.IsCloud ? ", cloud chat" : ", local chat");
+            }
+        }
         public string Hint { get { return Kind == "agent" ? Agent.AccessibleName : GroupHint ?? Title; } }
         public event PropertyChangedEventHandler PropertyChanged;
         public void Notify() { if (PropertyChanged != null) PropertyChanged(this, new PropertyChangedEventArgs("")); }
@@ -54,14 +61,16 @@ namespace Orbit
                 var project = Get("project:" + group.Key, "project", used);
                 project.Caption = first.ProjectName;
                 project.GroupHint = first.ProjectHint == "" ? first.ProjectName : first.ProjectHint;
-                if (!project.Seeded) { project.IsExpanded = roots.Count == 0; project.Seeded = true; }
+                if (!project.Seeded) { project.IsExpanded = first.IsCloud || roots.Count == 0; project.Seeded = true; }
                 var items = new List<TreeNode>();
                 foreach (var chat in group)
                 {
                     var node = Get("chat:" + chat.Id, "chat", used);
                     node.Chat = chat;
                     node.Caption = chat.Title;
-                    node.Description = chat.Updated.ToLocalTime().ToString("dd MMM yyyy · HH:mm") + (chat.Archived ? " · Archived" : "");
+                    var date = chat.Updated == DateTime.MinValue ? "" : chat.Updated.ToLocalTime().ToString("dd MMM yyyy · HH:mm");
+                    node.Description = chat.IsCloud ? chat.CloudStatus + (date == "" ? "" : " · " + date) :
+                        date + (chat.Archived ? " · Archived" : "");
                     node.GroupHint = node.Caption + "\n" + chat.Id;
                     node.Notify();
                     items.Add(node);

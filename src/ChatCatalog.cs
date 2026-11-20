@@ -13,6 +13,10 @@ namespace Orbit
         public string Id, Title, ProjectKey, ProjectName, ProjectHint;
         public DateTime Updated;
         public bool Archived;
+        public bool IsCloud { get; set; }
+        public string CloudStatus, CloudEnvironment;
+        public Uri CloudUrl;
+        public int? FilesChanged, LinesAdded, LinesRemoved, Attempts;
     }
 
     internal sealed class ChatCatalog

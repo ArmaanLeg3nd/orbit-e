@@ -292,6 +292,7 @@ namespace Orbit
                     liveWindow.Close();
                 }
                 CheckProjectCatalog(root);
+                CheckCloudCatalog(root);
                 report.Add("\n" + count + " checks passed.\nArtifacts: " + root);
             }
             catch (Exception ex) { report.Add(ex.ToString()); exit = 1; }
@@ -523,6 +524,67 @@ namespace Orbit
                   deduped.Contains("catalog-main") && deduped.Contains("different-request") && deduped.Contains("unrelated-workspace"),
                 "Duplicate setup shells are hidden while separate conversations and workspaces remain listed");
             Check(File.Exists(duplicate) && File.Exists(archivedShell), "Deduplication leaves the rollout files in place");
+        }
+        private static void CheckCloudCatalog(string root)
+        {
+            var cloud = CloudTasks.ReadPages(cursor =>
+            {
+                if (cursor != "" && cursor != "next-page") throw new InvalidOperationException("Unexpected cursor");
+                return serializer.Serialize(new {
+                    cursor = "next-page",
+                    tasks = new[] { new {
+                        id = "task_demo", title = "Prepare the observatory build", status = "in_progress",
+                        updated_at = "2026-11-20T09:15:00Z", environment_label = "Observatory repository",
+                        url = "https://chatgpt.com/codex/tasks/task_demo", attempt_total = 2,
+                        summary = new { files_changed = 3, lines_added = 19, lines_removed = 4 }
+                    } }
+                });
+            });
+            var task = cloud.Single();
+            Check(task.Id == "cloud:task_demo" && task.IsCloud && task.CloudStatus == "In Progress" &&
+                  task.FilesChanged == 3 && task.Attempts == 2 && task.CloudUrl != null,
+                "The cloud list parses task metadata, deduplicates paginated IDs, and stops on a repeated cursor");
+            Check(CloudTasks.BrowserUrl("https://chatgpt.com.example.test/codex/tasks/task_demo") == null &&
+                  CloudTasks.BrowserUrl("https://chatgpt.com/share/demo") == null &&
+                  CloudTasks.BrowserUrl("https://chatgpt.com/codex/settings") == null &&
+                  CloudTasks.BrowserUrl("https://chatgpt.com/codex/tasks/task_demo?redirect=elsewhere") == null &&
+                  CloudTasks.BrowserUrl("https://chatgpt.com/codex/tasks/task_demo#redirect") == null &&
+                  CloudTasks.BrowserUrl("https://chat.openai.com/codex/tasks/task_demo") != null &&
+                  CloudTasks.QuoteArgument("opaque \"token\\") == "\"opaque \\\"token\\\\\"",
+                "Cloud actions accept only Codex browser links and quote pagination cursors as a single argument");
+            var home = Path.Combine(root, "cloud-catalog");
+            var sessions = Directory.CreateDirectory(Path.Combine(home, "sessions")).FullName;
+            WriteSession(Path.Combine(sessions, "desktop.jsonl"), "desktop-fixture", "", "", root, "cli", DateTime.UtcNow);
+            AppendJson(Path.Combine(home, "session_index.jsonl"), new { id = "desktop-fixture", thread_name = "Review the local scheduling rules" });
+            using (var signal = new EventWaitHandle(false, EventResetMode.AutoReset))
+            {
+                var settings = new Options(new[] { "--workspace", root, "--all-projects" }) {
+                    CatalogHome = home, CloudFetcher = delegate { return cloud; }
+                };
+                var window = new Widget(settings, signal).Window;
+                window.Show(); Pump(500);
+                var tree = (TreeView)window.FindName("AgentTreeView");
+                Check(FindChatButton(tree, "desktop-fixture") != null && FindChatButton(tree, task.Id) == null,
+                    "The cloud source is idle until explicitly loaded");
+                Press(window, "CloudButton"); Pump(500);
+                var desktopButton = FindChatButton(tree, "desktop-fixture");
+                var cloudButton = FindChatButton(tree, task.Id);
+                var monitor = FindVisual<System.Windows.Shapes.Path>(desktopButton, icon => (string)icon.ToolTip == "Local chat");
+                var cloudIcon = FindVisual<System.Windows.Shapes.Path>(cloudButton, icon => (string)icon.ToolTip == "Codex Cloud chat");
+                Check(monitor != null && cloudIcon != null && monitor.Data.ToString() != cloudIcon.Data.ToString(),
+                    "The same catalog renders distinct computer and cloud icons");
+                Render(window, Path.Combine(root, "cloud-catalog.png"));
+                cloudButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, cloudButton)); Pump(230);
+                Check(((FrameworkElement)window.FindName("CloudView")).IsVisible &&
+                      ((FrameworkElement)window.FindName("CloudLinkButton")).IsVisible &&
+                      ((TextBlock)window.FindName("CloudChanges")).Text == "3 files changed · +19 lines · −4 lines",
+                    "Opening a cloud task shows its metadata and a link to the real Codex task");
+                Render(window, Path.Combine(root, "cloud-task.png"));
+                Press(window, "CloudBackButton"); Pump(100);
+                Check(((FrameworkElement)window.FindName("ExpandedView")).IsVisible && tree.Items.Count == 2,
+                    "Cloud details return to the combined catalog");
+                window.Close();
+            }
         }
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         private static extern IntPtr SendMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
