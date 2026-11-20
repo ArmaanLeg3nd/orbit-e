@@ -15,6 +15,14 @@ namespace OrbitEvolved
         public bool Archived;
     }
 
+    public sealed class ActiveChatEntry
+    {
+        public ChatSummary Chat;
+        public string Status;
+        public int Priority;
+        public int WorkingAgents;
+    }
+
     internal sealed class ChatCatalog
     {
         private enum ChatContent { Unknown, Empty, HasActivity }
@@ -42,6 +50,7 @@ namespace OrbitEvolved
         private Dictionary<string, Rollout> threads = new Dictionary<string, Rollout>(StringComparer.Ordinal);
         private readonly Dictionary<string, ActivityReader> readers = new Dictionary<string, ActivityReader>(StringComparer.Ordinal);
         private readonly Dictionary<string, List<Rollout>> teams = new Dictionary<string, List<Rollout>>(StringComparer.Ordinal);
+        private readonly HashSet<string> observedActive = new HashSet<string>(StringComparer.Ordinal);
         private List<ChatSummary> chats = new List<ChatSummary>();
         private DateTime nextScan;
 
@@ -77,33 +86,56 @@ namespace OrbitEvolved
                 return detail;
             }
             var listing = new Snapshot {
-                Project = "Codex projects", Chats = chats, TotalSessions = chats.Count, Connected = chats.Count > 0,
+                Project = "Codex projects", Chats = chats, ActiveChatEntries = new List<ActiveChatEntry>(),
+                TotalSessions = chats.Count, Connected = chats.Count > 0,
                 Source = chats.Count == 1 ? "1 local chat" : chats.Count + " local chats",
                 Problem = chats.Count == 0 ? "Local Codex chats will appear here when their session files are available." : ""
             };
             var cutoff = DateTime.UtcNow.AddMinutes(-5);
-            var recent = chats.Where(item => !item.Archived && teams[item.Id].Any(row => row.LastActivity >= cutoff))
+            var recent = chats.Where(item => !item.Archived &&
+                (observedActive.Contains(item.Id) || teams[item.Id].Any(row => row.LastActivity >= cutoff)))
                 .OrderByDescending(item => teams[item.Id].Max(row => row.LastActivity)).ToList();
             var keep = new HashSet<string>(recent.Select(item => item.Id), StringComparer.Ordinal);
+            observedActive.IntersectWith(keep);
             if (retain != null && teams.ContainsKey(retain)) keep.Add(retain);
             foreach (var id in readers.Keys.Where(id => !keep.Contains(id)).ToList()) readers.Remove(id);
-            var bestPriority = Int32.MaxValue;
             foreach (var item in recent)
             {
                 var detail = ReadChat(item);
                 if (!detail.Connected || detail.CatchingUp) continue;
-                var activeAgents = detail.Agents.Where(agent => agent.Updated >= cutoff).ToList();
+                var known = observedActive.Contains(item.Id);
+                var lead = detail.Agents.FirstOrDefault(agent => agent.Id == item.Id);
+                var completedAt = lead != null && lead.State == "completed" ? lead.Ended : DateTime.MinValue;
+                var activeAgents = detail.Agents.Where(agent => agent.Updated >= cutoff ||
+                    (known && agent.Updated >= completedAt &&
+                        (agent.State == "attention" || agent.State == "waiting" || agent.QuietUnfinished))).ToList();
                 var working = activeAgents.Count(agent => agent.State == "working");
                 var attention = activeAgents.Any(agent => agent.State == "attention");
+                var failed = activeAgents.Any(agent => agent.State == "error");
                 var waiting = activeAgents.Any(agent => agent.State == "waiting");
-                if (!attention && working == 0 && !waiting) continue;
-                listing.ActiveChats++;
-                listing.WorkingAgents += working;
-                var priority = attention ? 0 : working > 0 ? 1 : 2;
-                if (priority >= bestPriority) continue;
-                bestPriority = priority;
-                listing.ActiveChat = item;
-                listing.ActiveChatStatus = attention ? "Needs your input" : working > 0 ? "Working" : "Waiting";
+                var quiet = known && activeAgents.Any(agent => agent.QuietUnfinished);
+                if (!attention && !failed && working == 0 && !waiting && !quiet)
+                {
+                    observedActive.Remove(item.Id);
+                    continue;
+                }
+                observedActive.Add(item.Id);
+                listing.ActiveChatEntries.Add(new ActiveChatEntry
+                {
+                    Chat = item,
+                    WorkingAgents = working,
+                    Priority = attention ? 0 : failed ? 1 : working > 0 ? 2 : waiting ? 3 : 4,
+                    Status = attention ? "Needs your input" : failed ? "Needs attention" :
+                        working > 0 ? "Working" : waiting ? "Waiting" : "No recent activity"
+                });
+            }
+            listing.ActiveChatEntries = listing.ActiveChatEntries.OrderBy(entry => entry.Priority).ToList();
+            var first = listing.ActiveChatEntries.FirstOrDefault();
+            if (first != null)
+            {
+                listing.ActiveChat = first.Chat;
+                listing.ActiveChatStatus = first.Status;
+                listing.WorkingAgents = listing.ActiveChatEntries.Sum(entry => entry.WorkingAgents);
             }
             return listing;
         }

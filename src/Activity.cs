@@ -70,7 +70,9 @@ namespace OrbitEvolved
         public DateTime Updated { get; set; }
         public DateTime Ended { get; set; }
         public bool IsRoot { get; set; }
+        public bool QuietUnfinished { get; set; }
         public List<ActivityEvent> Events = new List<ActivityEvent>();
+        public HashSet<string> ChangedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         public Brush AccentBrush { get { return Palette.State(State); } }
         public Brush SoftBrush { get { return Palette.Color("#20FFFFFF"); } }
         public string Glyph { get { return State == "completed" ? "\uE73E" : State == "attention" || State == "error" ? "\uE7BA" : Role == "explorer" ? "\uE721" : Role == "reviewer" ? "\uE73E" : Role == "tester" ? "\uE9D9" : IsRoot ? "\uE8D7" : "\uE943"; } }
@@ -107,10 +109,16 @@ namespace OrbitEvolved
                 return entry == null ? summary : entry.Body;
             }
         }
-        public Agent Copy() { var copy = (Agent)MemberwiseClone(); copy.Events = new List<ActivityEvent>(Events); return copy; }
+        public Agent Copy()
+        {
+            var copy = (Agent)MemberwiseClone();
+            copy.Events = new List<ActivityEvent>(Events);
+            copy.ChangedFiles = new HashSet<string>(ChangedFiles, StringComparer.OrdinalIgnoreCase);
+            return copy;
+        }
         public void Refresh(Agent next)
         {
-            ParentId = next.ParentId; RecordedParentId = next.RecordedParentId; Name = next.Name; Workspace = next.Workspace; Task = next.Task; Result = next.Result; State = next.State; Role = next.Role; Started = next.Started; Updated = next.Updated; Ended = next.Ended; IsRoot = next.IsRoot; Events = next.Events;
+            ParentId = next.ParentId; RecordedParentId = next.RecordedParentId; Name = next.Name; Workspace = next.Workspace; Task = next.Task; Result = next.Result; State = next.State; Role = next.Role; Started = next.Started; Updated = next.Updated; Ended = next.Ended; IsRoot = next.IsRoot; QuietUnfinished = next.QuietUnfinished; Events = next.Events; ChangedFiles = next.ChangedFiles;
             Notify();
         }
         public void Notify() { if (PropertyChanged != null) PropertyChanged(this, new PropertyChangedEventArgs("")); }
@@ -132,7 +140,8 @@ namespace OrbitEvolved
         public List<ChatSummary> Chats;
         public ChatSummary ActiveChat;
         public string ActiveChatStatus;
-        public int ActiveChats;
+        public List<ActiveChatEntry> ActiveChatEntries;
+        public int ActiveChats { get { return ActiveChatEntries == null ? 0 : ActiveChatEntries.Count; } }
         public int WorkingAgents;
         public string Project = "";
         public string Source = "Watching local activity";
@@ -387,7 +396,12 @@ namespace OrbitEvolved
                 foreach (var agent in snapshot.Agents)
                 {
                     // A silent log is not proof of completion. Keep that distinction visible.
-                    if (agent.State == "working" && (DateTime.UtcNow - agent.Updated).TotalMinutes > 5) { agent.State = "idle"; agent.Ended = agent.Updated; }
+                    if (agent.State == "working" && (DateTime.UtcNow - agent.Updated).TotalMinutes > 5)
+                    {
+                        agent.QuietUnfinished = true;
+                        agent.State = "idle";
+                        agent.Ended = agent.Updated;
+                    }
                 }
                 if (!String.IsNullOrEmpty(eventFile)) snapshot.Agents = snapshot.Agents.OrderByDescending(a => a.IsRoot).ThenBy(a => a.State == "attention" || a.State == "error" ? 0 : a.State == "working" ? 1 : a.State == "waiting" ? 2 : 3).ThenBy(a => a.Started).ThenBy(a => a.Id, StringComparer.Ordinal).ToList();
                 if (String.IsNullOrEmpty(eventFile)) snapshot.TotalAgents = snapshot.Agents.Count;
@@ -693,7 +707,7 @@ namespace OrbitEvolved
         {
             ClearPending(file);
             file.MessageIds.Clear(); file.MessageOrder.Clear();
-            file.Agent.Events.Clear(); file.Agent.State = "idle"; file.Agent.Task = "Waiting for activity";
+            file.Agent.Events.Clear(); file.Agent.ChangedFiles.Clear(); file.Agent.State = "idle"; file.Agent.Task = "Waiting for activity";
             file.Agent.Started = file.InitialStarted; file.Agent.Ended = DateTime.MinValue; file.Agent.Updated = file.InitialStarted;
         }
         private static string CorrelationId(Dictionary<string, object> payload)
@@ -879,8 +893,19 @@ namespace OrbitEvolved
             }
             else if (type == "FileChange")
             {
-                label = ChangeLabel(item, finished && status == "completed", failed);
-                detail = ChangeLabel(item, finished && status == "completed", failed, true);
+                var applied = finished && status == "completed";
+                if (applied)
+                {
+                    var changes = Json.Map(item, "changes");
+                    if (changes != null)
+                        foreach (var path in changes.Keys)
+                        {
+                            var target = ActivityLinks.ResolveRecordedFile(path, file.Agent.Workspace);
+                            if (target != null) file.Agent.ChangedFiles.Add(target.Path);
+                        }
+                }
+                label = ChangeLabel(item, applied, failed);
+                detail = ChangeLabel(item, applied, failed, true);
             }
             else return; // No reasoning, prompts, command output, diffs, or unknown item contents.
             if (label == "") return;

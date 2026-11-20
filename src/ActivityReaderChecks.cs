@@ -195,6 +195,25 @@ namespace OrbitEvolved
             Result(path, "wrapper");
             var edited = reader.Poll().Agents.Single();
             check(edited.Task == "Updated Agent.cs, Widget.xaml" && edited.State == "working", "Completed edits identify files and survive the outer wrapper result");
+            check(edited.ChangedFiles.SetEquals(new[] { @"C:\private-path\Agent.cs", Path.Combine(root, "src", "Widget.xaml") }),
+                "Completed file changes retain all normalized paths independent of the activity labels");
+            Event(path, new { type = "item_started", item = new { type = "FileChange", status = "in_progress",
+                changes = new Dictionary<string, object> { { "pending.txt", new { type = "update" } } } } });
+            Item(path, new { type = "FileChange", status = "failed",
+                changes = new Dictionary<string, object> { { "failed.txt", new { type = "update" } } } }, at.AddSeconds(1));
+            Item(path, new { type = "FileChange", status = "completed",
+                changes = new Dictionary<string, object> {
+                    { "SRC/Widget.xaml", new { type = "update" } },
+                    { "Makefile", new { type = "add" } },
+                    { "literal%20.md", new { type = "add" } },
+                    { "https://example.invalid/remote.md", new { type = "add" } }
+                } }, at.AddSeconds(1));
+            var changed = reader.Poll().Agents.Single().ChangedFiles;
+            check(changed.Count == 4 && changed.Contains(Path.Combine(root, "Makefile")) &&
+                changed.Contains(Path.Combine(root, "literal%20.md")) &&
+                changed.All(file => !file.Contains("pending.txt") && !file.Contains("failed.txt") && !file.Contains("example.invalid")),
+                "Recorded edits are deduplicated and include extensionless names while incomplete, failed, and remote entries stay out");
+            check(edited.ChangedFiles.Count == 2, "A previously returned agent snapshot does not gain later file edits");
             Append(path, new { timestamp = at.AddSeconds(2).ToString("o"), type = "response_item", payload = new { type = "function_call", name = "functions.exec_command", call_id = "test", arguments = serializer.Serialize(new { cmd = ".\\build.ps1 -Test -Token private-token" }) } });
             var running = reader.Poll().Agents.Single();
             check(running.Task == "Running tests with build.ps1", "Recognized test calls show the runner");
@@ -230,6 +249,9 @@ namespace OrbitEvolved
             Item(path, new { type = "CommandExecution", command = "dotnet build", status = "completed", exit_code = 0 }, DateTime.UtcNow);
             var done = reader.Poll().Agents.Single();
             check(done.State == "completed" && done.Task == "Work complete", "Late rich tool items cannot revive a completed turn");
+            File.WriteAllText(path, "", new UTF8Encoding(false));
+            check(reader.Poll().Agents.All(agent => agent.ChangedFiles.Count == 0),
+                "A truncated rollout does not retain stale file edits");
         }
 
         private static void Item(string path, object item, DateTime at)

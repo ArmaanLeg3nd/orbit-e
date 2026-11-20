@@ -13,6 +13,8 @@ namespace OrbitEvolved
         public AgentGraphIssue Issue;
         public int Depth;
         public double Row;
+        public bool CanCollapse;
+        public int FoldedCount;
         public readonly List<AgentGraphNode> Children = new List<AgentGraphNode>();
     }
 
@@ -35,7 +37,7 @@ namespace OrbitEvolved
             return FromOrdered(OrderedAgents(source));
         }
 
-        public static AgentGraphLayout FromOrdered(List<Agent> ordered)
+        public static AgentGraphLayout FromOrdered(List<Agent> ordered, ISet<string> folded = null, string selected = null)
         {
             var layout = new AgentGraphLayout();
             var byId = ordered.ToDictionary(agent => agent.Id, agent => new AgentGraphNode { Agent = agent }, StringComparer.Ordinal);
@@ -59,9 +61,15 @@ namespace OrbitEvolved
                 else
                 {
                     byId[node.ParentId].Children.Add(node);
-                    layout.EdgeCount++;
                 }
             }
+
+            var subtreeSizes = FindFinishedBranches(roots);
+            var protectedPath = new HashSet<string>(StringComparer.Ordinal);
+            AgentGraphNode retained;
+            if (selected != null && byId.TryGetValue(selected, out retained))
+                for (var parent = retained.ParentId; parent != null; parent = byId[parent].ParentId)
+                    protectedPath.Add(parent);
 
             var nextRow = 0.0;
             foreach (var root in roots.OrderByDescending(node => node.Agent.IsRoot))
@@ -75,6 +83,12 @@ namespace OrbitEvolved
                     var node = pending.Pop();
                     layout.Nodes.Add(node);
                     layout.ColumnCount = Math.Max(layout.ColumnCount, node.Depth + 1);
+                    if (folded != null && node.CanCollapse && folded.Contains(node.Agent.Id) && !protectedPath.Contains(node.Agent.Id))
+                    {
+                        node.FoldedCount = subtreeSizes[node];
+                        node.Children.Clear();
+                    }
+                    layout.EdgeCount += node.Children.Count;
                     if (node.Children.Count == 0) node.Row = nextRow++;
                     else parents.Push(node);
                     for (int index = node.Children.Count - 1; index >= 0; index--)
@@ -92,6 +106,29 @@ namespace OrbitEvolved
             }
             layout.RowCount = nextRow;
             return layout;
+        }
+
+        private static Dictionary<AgentGraphNode, int> FindFinishedBranches(IEnumerable<AgentGraphNode> roots)
+        {
+            var pending = new Stack<AgentGraphNode>(roots);
+            var order = new Stack<AgentGraphNode>();
+            while (pending.Count != 0)
+            {
+                var node = pending.Pop();
+                order.Push(node);
+                foreach (var child in node.Children) pending.Push(child);
+            }
+            var finished = new Dictionary<AgentGraphNode, int>();
+            while (order.Count != 0)
+            {
+                var node = order.Pop();
+                var done = node.Agent.State == "completed" && node.Issue == AgentGraphIssue.None &&
+                    node.Children.All(finished.ContainsKey);
+                if (!done) continue;
+                finished[node] = 1 + node.Children.Sum(child => finished[child]);
+                node.CanCollapse = node.Children.Count != 0;
+            }
+            return finished;
         }
 
         private static void RemoveCycles(Dictionary<string, AgentGraphNode> byId)

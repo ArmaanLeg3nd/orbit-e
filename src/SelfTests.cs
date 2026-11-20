@@ -332,6 +332,8 @@ namespace OrbitEvolved
                     liveWindow.Close();
                 }
                 CheckProjectCatalog(root);
+                CheckQualityOfLifeCatalog(root);
+                CheckQualityOfLifeGraph(root);
                 report.Add("\n" + count + " checks passed.\nArtifacts: " + root);
             }
             catch (Exception ex) { report.Add(ex.ToString()); exit = 1; }
@@ -340,6 +342,13 @@ namespace OrbitEvolved
         }
         private static void AppendJson(string path, object record) { File.AppendAllText(path, serializer.Serialize(record) + "\n", new UTF8Encoding(false)); }
         private static void Press(Window window, string name) { var button = (Button)window.FindName(name); button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, button)); }
+        private static void Escape(UIElement element)
+        {
+            var args = new System.Windows.Input.KeyEventArgs(System.Windows.Input.Keyboard.PrimaryDevice,
+                PresentationSource.FromVisual(element), 0, System.Windows.Input.Key.Escape)
+                { RoutedEvent = System.Windows.Input.Keyboard.PreviewKeyDownEvent };
+            element.RaiseEvent(args);
+        }
         private static IEnumerable<TreeNode> Flatten(IEnumerable<TreeNode> nodes)
         {
             foreach (var node in nodes) { yield return node; foreach (var child in Flatten(node.Children)) yield return child; }
@@ -373,6 +382,176 @@ namespace OrbitEvolved
             }
             return null;
         }
+        private static void CheckQualityOfLifeCatalog(string root)
+        {
+            var home = Path.Combine(root, "qol-catalog");
+            var folder = Directory.CreateDirectory(Path.Combine(home, "sessions")).FullName;
+            var archived = Directory.CreateDirectory(Path.Combine(home, "archived_sessions")).FullName;
+            var projectA = Path.Combine(root, "Climate");
+            var projectB = Path.Combine(root, "Observatory");
+            AppendJson(Path.Combine(home, ".codex-global-state.json"), new Dictionary<string, object> {
+                { "local-projects", new {
+                    climate = new { id = "climate", name = "Climate", rootPaths = new[] { projectA } },
+                    observatory = new { id = "observatory", name = "Observatory", rootPaths = new[] { projectB } }
+                } }
+            });
+            var inputId = "01a00000-0000-7000-8000-000000000001";
+            var workingId = "01a00000-0000-7000-8000-000000000002";
+            var waitingId = "01a00000-0000-7000-8000-000000000003";
+            var archivedId = "01a00000-0000-7000-8000-000000000004";
+            var fixture = new[] {
+                Tuple.Create("approval", inputId, projectA, "Collect measurements"),
+                Tuple.Create("working", workingId, projectB, "Build schedule"),
+                Tuple.Create("waiting", waitingId, projectA, "Check sensors"),
+                Tuple.Create("archive", archivedId, projectB, "Old schedule")
+            };
+            var now = DateTime.UtcNow;
+            foreach (var chat in fixture)
+            {
+                var sessionFolder = chat.Item2 == archivedId ? archived : folder;
+                WriteSession(Path.Combine(sessionFolder, chat.Item1 + ".jsonl"), chat.Item2, "", "", chat.Item3, "cli", now);
+                AppendJson(Path.Combine(home, "session_index.jsonl"), new { id = chat.Item2, thread_name = chat.Item4 });
+            }
+            var input = Path.Combine(folder, "approval.jsonl");
+            AppendJson(input, new { timestamp = now.ToString("o"), type = "response_item",
+                payload = new { type = "function_call", name = "functions.request_user_input", call_id = "ask" } });
+            AppendJson(Path.Combine(folder, "waiting.jsonl"), new { timestamp = now.ToString("o"), type = "response_item",
+                payload = new { type = "function_call", name = "collaboration.wait_agent", call_id = "wait" } });
+            var catalog = new ChatCatalog(home, null);
+            var active = catalog.Poll(null);
+            Check(active.ActiveChatEntries.Select(entry => entry.Chat.Id).SequenceEqual(new[] { inputId, workingId, waitingId }) &&
+                  active.ActiveChatEntries.Select(entry => entry.Status).SequenceEqual(new[] { "Needs your input", "Working", "Waiting" }) &&
+                  active.ActiveChatEntries.Select(entry => entry.Chat.ProjectKey).Distinct().Count() == 2,
+                "Active chats span local projects, prioritize requests and exclude archives");
+            Check(active.ActiveChats == 3 && active.WorkingAgents == 1 && active.ActiveChat.Id == inputId,
+                "Active list and minimized status use the same live entries");
+            Check(CodexLink.ForChat(null) == null && CodexLink.ForChat("https://invalid.example") == null &&
+                  CodexLink.ForChat(workingId + "?other") == null,
+                "Codex links accept only a local chat UUID");
+            var opened = new List<Uri>();
+            using (var signal = new EventWaitHandle(false, EventResetMode.AutoReset))
+            {
+                var settings = new Options(new[] { "--workspace", root, "--all-projects" }) {
+                    CatalogHome = home, CodexLauncher = uri => { opened.Add(uri); return true; }
+                };
+                var window = new Widget(settings, signal).Window;
+                try
+                {
+                    window.Show(); Pump(500);
+                    Press(window, "FindChatButton");
+                    var search = (TextBox)window.FindName("ChatSearch");
+                    search.Text = "sCheDULE observatory";
+                    var tree = (TreeView)window.FindName("AgentTreeView");
+                    Pump(170);
+                    Check(new HashSet<string>(tree.Items.Cast<TreeNode>().Select(row => row.Chat.Id)).SetEquals(new[] { workingId, archivedId }),
+                        "Case-insensitive search combines chat title and project, including archives");
+                    var rowLink = FindVisual<Button>(tree, button => {
+                        var chat = button.Tag as ChatSummary;
+                        return button.IsVisible && chat != null && chat.Id == workingId && (string)button.CommandParameter == "codex";
+                    });
+                    Check(rowLink != null, "A valid catalog chat exposes Open in Codex on its row");
+                    rowLink.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, rowLink));
+                    Check(opened.Single().AbsoluteUri == "codex://threads/" + workingId,
+                        "The chat row launches the exact local Codex deep link");
+                    search.Text = "nothing matches this";
+                    Check(tree.Items.Count == 0 && ((TextBlock)window.FindName("EmptyHeading")).Text == "No matching chats",
+                        "An unmatched search shows an accurate empty state");
+                    Escape(search);
+                    Check(!search.IsVisible && tree.Items.Cast<TreeNode>().All(row => row.Kind == "project"),
+                        "Escape clears chat search and restores the grouped catalog");
+                    Press(window, "ActiveChatsButton"); Pump(150);
+                    Check(tree.Items.Cast<TreeNode>().Select(row => row.Chat.Id).SequenceEqual(new[] { inputId, workingId, waitingId }),
+                        "The native Active view shows all three chats in priority order");
+                    Render(window, Path.Combine(root, "qol-active-chats.png"));
+                    var target = FindVisual<Button>(tree, button => {
+                        var chat = button.Tag as ChatSummary;
+                        return button.IsVisible && chat != null && chat.Id == waitingId && button.CommandParameter == null;
+                    });
+                    Check(target != null, "Each active row exposes a workflow action");
+                    target.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, target)); Pump(700);
+                    var graph = window.OwnedWindows.OfType<AgentGraphWindow>().Single();
+                    Check(graph.IsVisible && graph.SelectedAgentId == waitingId, "An active row opens its own graph directly");
+                    var graphLink = FindVisual<Button>(graph, button => button.Content as string == "Open in Codex");
+                    graphLink.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, graphLink));
+                    Check(opened.Last().AbsoluteUri == "codex://threads/" + waitingId,
+                        "The graph uses the chat it displays for its Codex deep link");
+                    Press(window, "ChatFilesButton"); Pump(180);
+                    Check(FindVisual<TextBlock>(graph, text => text.IsVisible && text.Text == "No file edits recorded for this chat.") != null,
+                        "The chat's Files shortcut opens the graph's empty files view");
+                    graph.Close();
+                }
+                finally { window.Close(); }
+            }
+            var workingLog = Path.Combine(folder, "working.jsonl");
+            AppendJson(workingLog, new { timestamp = now.AddMinutes(-10).ToString("o"), type = "event_msg",
+                payload = new { type = "task_started" } });
+            Check(catalog.Poll(null).ActiveChatEntries.Single(entry => entry.Chat.Id == workingId).Status == "No recent activity",
+                "Previously observed silent work remains listed without an unverified Working claim");
+            AppendJson(input, new { timestamp = DateTime.UtcNow.ToString("o"), type = "event_msg", payload = new { type = "task_complete" } });
+            Check(catalog.Poll(null).ActiveChatEntries.All(entry => entry.Chat.Id != inputId),
+                "A completed chat drops out of the Active view after refresh");
+        }
+
+        private static void CheckQualityOfLifeGraph(string root)
+        {
+            var agents = new[] {
+                new Agent { Id = "root", IsRoot = true, State = "working", Workspace = root },
+                new Agent { Id = "branch", Name = "Builder", ParentId = "root", State = "completed", Workspace = root },
+                new Agent { Id = "nested", Name = "Nested reviewer", ParentId = "branch", State = "completed", Workspace = root },
+                new Agent { Id = "active", Name = "Verifier", ParentId = "root", State = "attention", Workspace = root }
+            };
+            agents[1].ChangedFiles.Add(Path.Combine(root, "build", "Script.ps1"));
+            agents[2].ChangedFiles.Add(Path.Combine(root, "review.md"));
+            var folds = new HashSet<string>(new[] { "branch", "root" });
+            var collapsed = AgentGraphLayout.FromOrdered(AgentGraphLayout.OrderedAgents(agents), folds);
+            Check(collapsed.Nodes.Count == 3 && collapsed.EdgeCount == 2 && collapsed.Nodes.Any(node => node.Agent.Id == "active") &&
+                  collapsed.Nodes.Single(node => node.Agent.Id == "branch").FoldedCount == 2,
+                "Only fully completed branches fold and their summary counts the branch root");
+            var retained = AgentGraphLayout.FromOrdered(AgentGraphLayout.OrderedAgents(agents), folds, "nested");
+            Check(retained.Nodes.Any(node => node.Agent.Id == "nested"), "Folding never hides the selected node");
+            var graph = new AgentGraphWindow { GentleMotion = false, Width = 690, Height = 510 };
+            try
+            {
+                graph.Update("Quality of life fixture", agents, root);
+                graph.Show(); Pump(170);
+                graph.SelectAgent("branch");
+                var fold = FindVisual<Button>(graph, button => button.Content as string == "Collapse branch");
+                fold.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, fold)); Pump(70);
+                Check(graph.NodeCount == 3 && graph.SelectedAgentId == "branch", "The native fold control leaves the selected summary visible");
+                graph.Update("Quality of life fixture", agents, root);
+                Check(graph.NodeCount == 3 && graph.SelectedAgentId == "branch", "A live refresh preserves the folded branch and selection");
+                Render(graph, Path.Combine(root, "qol-collapsed-branch.png"));
+
+                var find = FindVisual<Button>(graph, button => button.Content as string == "Find");
+                find.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, find));
+                var search = FindVisual<TextBox>(graph, field => field.IsVisible);
+                search.Text = "nested REVIEW";
+                var next = FindVisual<Button>(graph, button => button.Content as string == "Next");
+                next.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, next)); Pump(150);
+                Check(graph.NodeCount == 4 && graph.SelectedAgentId == "nested",
+                    "Agent search reveals its folded path and selects the matching agent");
+                Escape(search);
+                Check(graph.IsVisible && !search.IsVisible && graph.SelectedAgentId == "nested",
+                    "Escape closes agent search without closing the graph or losing selection");
+
+                graph.SelectAgent("branch");
+                fold.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, fold));
+                agents[2].State = "working";
+                graph.Update("Quality of life fixture", agents, root);
+                Check(graph.NodeCount == 4 && graph.SelectedAgentId == "branch", "A folded branch unfolds when a descendant starts working again");
+                graph.ShowFiles(); Pump(110);
+                var nested = FindVisual<TextBlock>(graph, text => text.IsVisible && text.Inlines.OfType<System.Windows.Documents.Hyperlink>()
+                    .Any(link => (string)link.ToolTip == Path.Combine(root, "review.md")));
+                var script = FindVisual<TextBlock>(graph, text => text.IsVisible && text.Inlines.OfType<System.Windows.Documents.Hyperlink>()
+                    .Any(link => (string)link.ToolTip == Path.Combine(root, "build", "Script.ps1")));
+                Check(nested != null && script != null &&
+                      FindVisual<TextBlock>(graph, text => text.IsVisible && text.Text == "/Nested reviewer") != null,
+                    "Files view groups clickable recorded edits by agent across the whole chat");
+                Render(graph, Path.Combine(root, "qol-files-changed.png"));
+            }
+            finally { graph.Close(); }
+        }
+
         private static void CheckProjectCatalog(string root)
         {
             var home = Path.Combine(root, "catalog");

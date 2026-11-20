@@ -15,6 +15,12 @@ namespace OrbitEvolved
         public string Description { get; set; }
         public string GroupHint { get; set; }
         public ChatSummary Chat { get; set; }
+        public bool CanOpenInCodex { get { return Chat != null && CodexLink.ForChat(Chat.Id) != null; } }
+        public string CodexAccessibleName { get { return "Open " + Caption + " in Codex"; } }
+        private static readonly System.Windows.Media.Brush ChatMuted = Palette.Color("#9BA3B0");
+        private static readonly System.Windows.Media.Brush ChatAttention = Palette.State("attention");
+        internal bool ChatNeedsAttention;
+        public System.Windows.Media.Brush ChatDescriptionBrush { get { return ChatNeedsAttention ? ChatAttention : ChatMuted; } }
         public bool Seeded;
         public readonly ObservableCollection<TreeNode> Items = new ObservableCollection<TreeNode>();
         public ObservableCollection<TreeNode> Children { get { return Items; } }
@@ -74,6 +80,30 @@ namespace OrbitEvolved
             Sync(Roots, roots);
             foreach (var key in nodes.Keys.Where(key => !used.Contains(key)).ToList()) nodes.Remove(key);
         }
+        internal void UpdateQuickCatalog(IEnumerable<ChatSummary> chats, Dictionary<string, ActiveChatEntry> active, string query)
+        {
+            var words = query.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+            var used = new HashSet<string>();
+            var rows = new List<TreeNode>();
+            foreach (var chat in chats)
+            {
+                var searchable = chat.Title + " " + chat.ProjectName;
+                if (!words.All(word => searchable.IndexOf(word, StringComparison.OrdinalIgnoreCase) >= 0)) continue;
+                var row = Get("chat:" + chat.Id, "chat", used);
+                row.Chat = chat;
+                row.Caption = chat.Title;
+                ActiveChatEntry entry;
+                var state = active.TryGetValue(chat.Id, out entry) ? entry.Status + " · " : "";
+                row.Description = state + chat.ProjectName + (chat.Archived ? " · Archived" : "");
+                row.ChatNeedsAttention = entry != null && entry.Priority <= 1;
+                row.GroupHint = row.Caption + "\n" + row.Description;
+                row.Notify();
+                rows.Add(row);
+            }
+            Sync(Roots, rows);
+            foreach (var key in nodes.Keys.Where(key => !used.Contains(key)).ToList()) nodes.Remove(key);
+        }
+
         public void Update(IEnumerable<Agent> source, string session, string project)
         {
             var all = source.GroupBy(a => a.Id).Select(g => g.First()).OrderBy(a => a.Started).ThenBy(a => a.Id).ToList();

@@ -64,15 +64,28 @@ namespace OrbitEvolved
 
         public static ActivityFileLink Resolve(string destination, string workspace)
         {
+            return Resolve(destination, workspace, false);
+        }
+
+        public static ActivityFileLink ResolveRecordedFile(string path, string workspace)
+        {
+            return Resolve(path, workspace, true);
+        }
+
+        private static ActivityFileLink Resolve(string destination, string workspace, bool recorded)
+        {
             if (String.IsNullOrWhiteSpace(destination)) return null;
-            var path = destination.Trim();
-            if (path.StartsWith("<") && path.EndsWith(">")) path = path.Substring(1, path.Length - 2);
-            if (path.StartsWith("file:///", StringComparison.OrdinalIgnoreCase)) path = path.Substring(8);
-            path = Uri.UnescapeDataString(path);
+            var path = recorded ? destination : destination.Trim();
+            if (!recorded)
+            {
+                if (path.StartsWith("<") && path.EndsWith(">")) path = path.Substring(1, path.Length - 2);
+                if (path.StartsWith("file:///", StringComparison.OrdinalIgnoreCase)) path = path.Substring(8);
+                path = Uri.UnescapeDataString(path);
+            }
             if (path.StartsWith("/") && DrivePath.IsMatch(path.Substring(1))) path = path.Substring(1);
             var location = LineSuffix.Match(path);
             var line = 0;
-            if (location.Success)
+            if (!recorded && location.Success)
             {
                 if (!Int32.TryParse(location.Groups["line"].Value, out line)) return null;
                 path = path.Substring(0, location.Index);
@@ -84,7 +97,7 @@ namespace OrbitEvolved
             {
                 if (!absolute)
                 {
-                    if (!DrivePath.IsMatch(workspace) || !Path.HasExtension(path)) return null;
+                    if (!DrivePath.IsMatch(workspace ?? "") || (!recorded && !Path.HasExtension(path))) return null;
                     path = Path.Combine(workspace, path);
                 }
                 path = Path.GetFullPath(path);
@@ -111,14 +124,7 @@ namespace OrbitEvolved
                     var file = !code.Success || target.IndexOfAny(new[] { '\\', '/', ':' }) >= 0 ? Resolve(target, workspace) : null;
                     if (file != null)
                     {
-                        var hyperlink = new Hyperlink(new Run(code.Success ? label : PlainText(label))) {
-                            Foreground = Palette.Color("#ACCBF1"), ToolTip = file.Reference
-                        };
-                        hyperlink.Click += delegate
-                        {
-                            if (!Open(file)) MessageBox.Show("This file could not be opened.\n\n" + file.Reference, Product.Name, MessageBoxButton.OK, MessageBoxImage.Information);
-                        };
-                        inlines.Add(hyperlink);
+                        inlines.Add(FileHyperlink(file, code.Success ? label : PlainText(label)));
                     }
                     else if (code.Success) inlines.Add(new Run(label) { FontFamily = ActivityMarkdown.CodeFont });
                     else Render(inlines, label, workspace);
@@ -136,6 +142,16 @@ namespace OrbitEvolved
                 position = match.Index + match.Length;
             }
             if (position < body.Length) inlines.Add(new Run(body.Substring(position)));
+        }
+
+        internal static Hyperlink FileHyperlink(ActivityFileLink file, string label)
+        {
+            var link = new Hyperlink(new Run(label)) { Foreground = Palette.Color("#ACCBF1"), ToolTip = file.Reference };
+            link.Click += delegate
+            {
+                if (!Open(file)) MessageBox.Show("This file could not be opened.\n\n" + file.Reference, Product.Name, MessageBoxButton.OK, MessageBoxImage.Information);
+            };
+            return link;
         }
 
         private static bool Open(ActivityFileLink file)

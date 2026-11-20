@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -63,6 +64,17 @@ namespace OrbitEvolved
         private readonly ActivityTextBlock activity;
         private readonly StackPanel history;
         private readonly Button readsToggle;
+        private readonly Button openCodex, findAgent, nextAgent, branchToggle, detailsTab, filesTab;
+        private readonly TextBox agentSearch;
+        private readonly DockPanel searchBar;
+        private readonly TextBlock searchCount;
+        private readonly StackPanel detailBody, filesBody;
+        private readonly HashSet<string> foldedBranches = new HashSet<string>(StringComparer.Ordinal);
+        private List<Agent> allAgents = new List<Agent>();
+        private List<Agent> searchHits = new List<Agent>();
+        private Action openCodexAction;
+        private bool showingFiles;
+        private string filesFingerprint;
         private readonly Button maximize;
         private readonly Button close;
         private readonly Grid frame;
@@ -148,6 +160,9 @@ namespace OrbitEvolved
             var controls = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Top };
             Grid.SetColumn(controls, 1);
             header.Children.Add(controls);
+            openCodex = ViewButton("Open in Codex", "Open this chat in Codex Desktop", delegate { if (openCodexAction != null) openCodexAction(); });
+            openCodex.Visibility = Visibility.Collapsed;
+            controls.Children.Add(openCodex);
             maximize = HeaderButton(ExpandIcon, "Maximize", ToggleMaximized);
             controls.Children.Add(maximize);
             close = HeaderButton(CloseIcon, "Close graph (Esc)", CloseFromControl);
@@ -164,9 +179,22 @@ namespace OrbitEvolved
             };
             PreviewKeyDown += delegate(object sender, KeyEventArgs args)
             {
-                if (args.Key != Key.Escape) return;
-                args.Handled = true;
-                CloseFromControl();
+                if (args.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control)
+                {
+                    ShowAgentSearch();
+                    args.Handled = true;
+                }
+                else if (args.Key == Key.Escape)
+                {
+                    args.Handled = true;
+                    if (searchBar.Visibility == Visibility.Visible)
+                    {
+                        searchBar.Visibility = Visibility.Collapsed;
+                        agentSearch.Clear();
+                        findAgent.Focus();
+                    }
+                    else CloseFromControl();
+                }
             };
 
             var columns = new Grid();
@@ -183,9 +211,14 @@ namespace OrbitEvolved
             DockPanel.SetDock(graphHeader, Dock.Top);
             graphPanel.Children.Add(graphHeader);
             graphHeader.Children.Add(Label("Delegation graph", 13, Primary, FontWeights.SemiBold));
+            findAgent = ViewButton("Find", "Find agents (Ctrl+F)", ShowAgentSearch);
+            DockPanel.SetDock(findAgent, Dock.Right);
+            graphHeader.Children.Add(findAgent);
             graphCount = Label("", 11, Secondary, FontWeights.Normal);
             graphCount.HorizontalAlignment = HorizontalAlignment.Right;
             graphCount.VerticalAlignment = VerticalAlignment.Center;
+            graphCount.Margin = new Thickness(0, 0, 7, 0);
+            graphCount.TextTrimming = TextTrimming.CharacterEllipsis;
             graphHeader.Children.Add(graphCount);
 
             var graphFooter = new DockPanel { Margin = new Thickness(13, 9, 13, 10) };
@@ -207,6 +240,27 @@ namespace OrbitEvolved
             graphWarning.Margin = new Thickness(0, 3, 0, 0);
             graphWarning.TextTrimming = TextTrimming.CharacterEllipsis;
             legend.Children.Add(graphWarning);
+
+            searchBar = new DockPanel { Margin = new Thickness(13, 0, 13, 8), Visibility = Visibility.Collapsed };
+            DockPanel.SetDock(searchBar, Dock.Top);
+            graphPanel.Children.Add(searchBar);
+            nextAgent = ViewButton("Next", "Select the next matching agent", delegate { SelectSearchMatch(1); });
+            DockPanel.SetDock(nextAgent, Dock.Right);
+            searchBar.Children.Add(nextAgent);
+            searchCount = Label("", 11, Muted, FontWeights.Normal);
+            searchCount.Margin = new Thickness(7, 3, 2, 0);
+            DockPanel.SetDock(searchCount, Dock.Right);
+            searchBar.Children.Add(searchCount);
+            agentSearch = new TextBox { Foreground = Primary, Background = Board, BorderBrush = SelectedOutline, Padding = new Thickness(5, 3, 5, 3) };
+            AutomationProperties.SetName(agentSearch, "Search agent names");
+            searchBar.Children.Add(agentSearch);
+            agentSearch.TextChanged += delegate { RefreshAgentSearch(); };
+            agentSearch.PreviewKeyDown += delegate(object sender, KeyEventArgs args)
+            {
+                if (args.Key != Key.Enter) return;
+                SelectSearchMatch((Keyboard.Modifiers & ModifierKeys.Shift) == 0 ? 1 : -1);
+                args.Handled = true;
+            };
 
             var viewport = new Grid { Background = Dots() };
             graphPanel.Children.Add(new Border { BorderBrush = Outline, BorderThickness = new Thickness(0, 1, 0, 1), Child = viewport });
@@ -257,7 +311,12 @@ namespace OrbitEvolved
             var details = new DockPanel();
             inspector.Child = details;
             var inspectorHeader = new Border { BorderBrush = Outline, BorderThickness = new Thickness(0, 0, 0, 1), Padding = new Thickness(14, 10, 14, 10) };
-            inspectorHeader.Child = Label("Agent details", 13, Primary, FontWeights.SemiBold);
+            var inspectorTabs = new StackPanel { Orientation = Orientation.Horizontal };
+            detailsTab = ViewButton("Agent details", "Show selected agent details", delegate { SetInspector(false); });
+            filesTab = ViewButton("Files changed", "Show files changed in this chat", ShowFiles);
+            inspectorTabs.Children.Add(detailsTab);
+            inspectorTabs.Children.Add(filesTab);
+            inspectorHeader.Child = inspectorTabs;
             DockPanel.SetDock(inspectorHeader, Dock.Top);
             details.Children.Add(inspectorHeader);
             detailScroll = new ScrollViewer
@@ -268,8 +327,12 @@ namespace OrbitEvolved
             };
             AutomationProperties.SetName(detailScroll, "Selected agent activity");
             details.Children.Add(detailScroll);
-            var detailBody = new StackPanel { Margin = new Thickness(14, 11, 14, 15) };
-            detailScroll.Content = detailBody;
+            var inspectorBody = new Grid { Margin = new Thickness(14, 11, 14, 15) };
+            detailBody = new StackPanel();
+            filesBody = new StackPanel { Visibility = Visibility.Collapsed };
+            inspectorBody.Children.Add(detailBody);
+            inspectorBody.Children.Add(filesBody);
+            detailScroll.Content = inspectorBody;
 
             agentName = Label("", 19, Primary, FontWeights.SemiBold);
             agentName.TextWrapping = TextWrapping.Wrap;
@@ -289,6 +352,10 @@ namespace OrbitEvolved
             agentIssue.Margin = new Thickness(0, 7, 0, 0);
             agentIssue.TextWrapping = TextWrapping.Wrap;
             detailBody.Children.Add(agentIssue);
+            branchToggle = ViewButton("Collapse branch", "Collapse this completed branch", ToggleSelectedBranch);
+            branchToggle.Margin = new Thickness(0, 6, 0, 0);
+            branchToggle.HorizontalAlignment = HorizontalAlignment.Left;
+            detailBody.Children.Add(branchToggle);
 
             detailHeading = Label("", 12, Primary, FontWeights.SemiBold);
             detailHeading.Margin = new Thickness(0, 17, 0, 6);
@@ -315,6 +382,7 @@ namespace OrbitEvolved
             history = new StackPanel();
             detailBody.Children.Add(history);
 
+            SetInspector(false);
             Update("", Enumerable.Empty<Agent>(), "");
             SourceInitialized += delegate { CenterOnMonitor(); };
             Loaded += delegate
@@ -464,18 +532,145 @@ namespace OrbitEvolved
 
         public void Update(string chatTitle, IEnumerable<Agent> agents, string fallbackWorkspace)
         {
-            var ordered = AgentGraphLayout.OrderedAgents(agents ?? Enumerable.Empty<Agent>());
+            allAgents = AgentGraphLayout.OrderedAgents(agents ?? Enumerable.Empty<Agent>());
             this.fallbackWorkspace = fallbackWorkspace ?? "";
             chatHeading.Text = chatTitle ?? "";
             chatHeading.ToolTip = chatHeading.Text;
             Title = Product.Name + " · " + (chatHeading.Text == "" ? "Agent workflow" : chatHeading.Text);
 
-            if (layout == null || ordered.Count != cards.Count || ordered.Any(agent => !cards.ContainsKey(agent.Id) || !cards[agent.Id].MatchesTopology(agent)))
-                ArrangeGraph(AgentGraphLayout.FromOrdered(ordered));
+            RefreshGraph();
+        }
 
-            foreach (var agent in ordered) cards[agent.Id].Refresh(agent);
+        private void RefreshGraph()
+        {
+            var next = AgentGraphLayout.FromOrdered(allAgents, foldedBranches, selectedId);
+            foreach (var node in next.Nodes)
+                if (!node.CanCollapse) foldedBranches.Remove(node.Agent.Id);
+            if (layout == null || next.Nodes.Count != layout.Nodes.Count ||
+                next.Nodes.Where((node, index) => !SamePlacement(node, layout.Nodes[index])).Any())
+                ArrangeGraph(next);
+            foreach (var node in next.Nodes) cards[node.Agent.Id].Refresh(node.Agent);
             SelectAgent(selectedId != null && cards.ContainsKey(selectedId) ? selectedId :
                 layout.Nodes.Count == 0 ? null : layout.Nodes[0].Agent.Id);
+            RefreshAgentSearch();
+            if (showingFiles) RefreshFiles();
+        }
+
+        private static bool SamePlacement(AgentGraphNode left, AgentGraphNode right)
+        {
+            return left.Agent.Id == right.Agent.Id && left.ParentId == right.ParentId && left.Issue == right.Issue &&
+                left.Depth == right.Depth && left.Row == right.Row && left.CanCollapse == right.CanCollapse &&
+                left.FoldedCount == right.FoldedCount;
+        }
+
+        private void ShowAgentSearch()
+        {
+            searchBar.Visibility = Visibility.Visible;
+            RefreshAgentSearch();
+            agentSearch.Focus();
+            agentSearch.SelectAll();
+        }
+
+        private void RefreshAgentSearch()
+        {
+            if (searchBar.Visibility != Visibility.Visible) return;
+            var query = agentSearch.Text.Trim();
+            searchHits = query == "" ? new List<Agent>() : allAgents.Where(agent =>
+                agent.DisplayName.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                (agent.Name ?? "").IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0).ToList();
+            searchCount.Text = query == "" ? "" : searchHits.Count == 1 ? "1 match" : searchHits.Count + " matches";
+            nextAgent.IsEnabled = searchHits.Count != 0;
+        }
+
+        private void SelectSearchMatch(int step)
+        {
+            if (searchHits.Count == 0) return;
+            var index = searchHits.FindIndex(agent => agent.Id == selectedId);
+            var next = searchHits[index < 0 ? (step > 0 ? 0 : searchHits.Count - 1) :
+                (index + step + searchHits.Count) % searchHits.Count].Id;
+            if (!cards.ContainsKey(next))
+            {
+                // Keep unrelated branches folded while making this real agent visible.
+                var ordered = allAgents.ToDictionary(agent => agent.Id, StringComparer.Ordinal);
+                var visited = new HashSet<string>(StringComparer.Ordinal);
+                Agent ancestor;
+                for (var id = next; id != null && visited.Add(id) && ordered.TryGetValue(id, out ancestor);
+                    id = ancestor.RecordedParentId ?? ancestor.ParentId)
+                    foldedBranches.Remove(id);
+                RefreshGraph();
+            }
+            SetInspector(false);
+            if (!SelectAgent(next)) return;
+            graphScroll.UpdateLayout();
+            var node = cards[next].Node;
+            graphScroll.ScrollToHorizontalOffset((NodeX(node) + CardWidth / 2) * Zoom - graphScroll.ViewportWidth / 2);
+            graphScroll.ScrollToVerticalOffset((NodeY(node) + CardHeight / 2) * Zoom - graphScroll.ViewportHeight / 2);
+        }
+
+        private void ToggleSelectedBranch()
+        {
+            GraphCard card;
+            if (selectedId == null || !cards.TryGetValue(selectedId, out card) || !card.Node.CanCollapse) return;
+            if (!foldedBranches.Remove(selectedId)) foldedBranches.Add(selectedId);
+            RefreshGraph();
+        }
+
+        internal void SetOpenCodex(Action action)
+        {
+            openCodexAction = action;
+            openCodex.Visibility = VisibleIf(action != null);
+        }
+
+        internal void ShowFiles() { SetInspector(true); }
+
+        private void SetInspector(bool files)
+        {
+            var changed = showingFiles != files;
+            showingFiles = files;
+            detailBody.Visibility = VisibleIf(!files);
+            filesBody.Visibility = VisibleIf(files);
+            detailsTab.Background = files ? Brushes.Transparent : PanelSurface;
+            filesTab.Background = files ? PanelSurface : Brushes.Transparent;
+            AutomationProperties.SetName(detailScroll, files ? "Files changed in this chat" : "Selected agent activity");
+            if (changed) detailScroll.ScrollToTop();
+            if (files) RefreshFiles();
+        }
+
+        private void RefreshFiles()
+        {
+            var groups = allAgents.Where(agent => agent.ChangedFiles.Count != 0).Select(agent => new {
+                Agent = agent,
+                Paths = agent.ChangedFiles.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToArray()
+            }).ToList();
+            var fingerprint = String.Join("\0", groups.SelectMany(group =>
+                new[] { group.Agent.Id, group.Agent.DisplayName, group.Agent.Workspace ?? "" }.Concat(group.Paths)));
+            if (fingerprint == filesFingerprint) return;
+            filesFingerprint = fingerprint;
+            filesBody.Children.Clear();
+            if (groups.Count == 0)
+            {
+                filesBody.Children.Add(Label("No file edits recorded for this chat.", 12, Secondary, FontWeights.Normal));
+                return;
+            }
+            foreach (var group in groups)
+            {
+                var heading = Label(group.Agent.DisplayName, 13, Primary, FontWeights.SemiBold);
+                heading.Margin = new Thickness(0, filesBody.Children.Count == 0 ? 0 : 12, 0, 5);
+                filesBody.Children.Add(heading);
+                foreach (var path in group.Paths)
+                {
+                    var file = new ActivityFileLink { Path = path };
+                    var workspace = group.Agent.Workspace ?? "";
+                    var prefix = workspace.TrimEnd('\\', '/') + Path.DirectorySeparatorChar;
+                    var label = workspace != "" && path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                        ? path.Substring(prefix.Length) : path;
+                    var row = Label("", 12, Secondary, FontWeights.Normal);
+                    row.TextWrapping = TextWrapping.Wrap;
+                    row.Margin = new Thickness(0, 0, 0, 4);
+                    row.Inlines.Add(ActivityLinks.FileHyperlink(file, label));
+                    filesBody.Children.Add(row);
+                }
+            }
         }
 
         internal bool SelectAgent(string id)
@@ -489,8 +684,11 @@ namespace OrbitEvolved
                 showFileReads = false;
                 if (selectedId != null) cards[selectedId].SetSelected(true);
                 HighlightBranch();
-                detailScroll.ScrollToTop();
-                if (IsLoaded && MotionEnabled) detailScroll.BeginAnimation(OpacityProperty, Motion(0.45, 1, 190));
+                if (!showingFiles)
+                {
+                    detailScroll.ScrollToTop();
+                    if (IsLoaded && MotionEnabled) detailScroll.BeginAnimation(OpacityProperty, Motion(0.45, 1, 190));
+                }
             }
             RefreshInspector();
             return true;
@@ -513,7 +711,7 @@ namespace OrbitEvolved
                 if (!cards.TryGetValue(id, out card))
                 {
                     card = new GraphCard();
-                    card.Click += delegate { SelectAgent(id); };
+                    card.Click += delegate { SetInspector(false); SelectAgent(id); };
                     card.PreviewKeyDown += CardKeyDown;
                     cards.Add(id, card);
                     canvas.Children.Add(card);
@@ -573,7 +771,7 @@ namespace OrbitEvolved
             if (selectedId == null || !cards.TryGetValue(selectedId, out card))
             {
                 agentName.Text = "No agent selected";
-                agentStatus.Visibility = agentParent.Visibility = agentChildren.Visibility = agentIssue.Visibility = Visibility.Collapsed;
+                agentStatus.Visibility = agentParent.Visibility = agentChildren.Visibility = agentIssue.Visibility = branchToggle.Visibility = Visibility.Collapsed;
                 agentLinksKey = null;
                 detailHeading.Visibility = activity.Visibility = Visibility.Collapsed;
                 historyHeading.Visibility = readsToggle.Visibility = Visibility.Collapsed;
@@ -589,6 +787,11 @@ namespace OrbitEvolved
             RefreshAgentLinks(card.Node);
             agentIssue.Text = IssueText(card.Node);
             agentIssue.Visibility = VisibleIf(agentIssue.Text != "");
+            branchToggle.Visibility = VisibleIf(card.Node.CanCollapse);
+            var branchAction = card.Node.FoldedCount == 0 ? "Collapse branch" : "Expand branch";
+            branchToggle.Content = branchAction;
+            branchToggle.ToolTip = branchAction;
+            AutomationProperties.SetName(branchToggle, branchAction);
             var workspace = String.IsNullOrEmpty(agent.Workspace) ? fallbackWorkspace : agent.Workspace;
             var hasResult = agent.State == "completed" && !String.IsNullOrWhiteSpace(agent.Result);
             var summary = agent.ActivitySummary;
@@ -670,6 +873,7 @@ namespace OrbitEvolved
         private void FocusAgent(string id)
         {
             if (!SelectAgent(id)) return;
+            SetInspector(false);
             cards[id].Focus();
             cards[id].BringIntoView();
         }
@@ -823,11 +1027,8 @@ namespace OrbitEvolved
             private readonly TextBlock summary;
             private readonly TextBlock issue;
             private readonly TextBlock glyph;
-            private string recordedParentId;
-            private string adjustedParentId;
-            private DateTime recordedStart;
-            private bool recordedRoot;
             private string previousState;
+            private int previousFoldedCount;
             private string previousDetail;
             public AgentGraphNode Node { get; private set; }
             public Agent Agent { get; private set; }
@@ -874,17 +1075,7 @@ namespace OrbitEvolved
             {
                 Node = node;
                 TabIndex = index;
-                recordedParentId = node.Agent.RecordedParentId;
-                adjustedParentId = node.Agent.ParentId;
-                recordedStart = node.Agent.Started;
-                recordedRoot = node.Agent.IsRoot;
                 issue.Text = node.Issue == AgentGraphIssue.None ? "" : "!";
-            }
-
-            public bool MatchesTopology(Agent agent)
-            {
-                return recordedParentId == agent.RecordedParentId && adjustedParentId == agent.ParentId &&
-                    recordedStart == agent.Started && recordedRoot == agent.IsRoot;
             }
 
             public void Refresh(Agent agent)
@@ -893,11 +1084,12 @@ namespace OrbitEvolved
                 name.Text = agent.DisplayName;
                 glyph.Text = agent.Glyph;
                 var state = agent.State ?? "";
-                if (previousState != state)
+                if (previousState != state || previousFoldedCount != Node.FoldedCount)
                 {
-                    status.Text = agent.StatusLabel;
+                    status.Text = Node.FoldedCount > 0 ? Node.FoldedCount + " done" : agent.StatusLabel;
                     status.Foreground = glyph.Foreground = agent.AccentBrush;
                     previousState = state;
+                    previousFoldedCount = Node.FoldedCount;
                 }
                 var detail = agent.ActivityDetail;
                 if (previousDetail != detail)
@@ -908,6 +1100,7 @@ namespace OrbitEvolved
                 }
                 var warning = IssueText(Node);
                 var caption = name.Text + " \u00b7 " + status.Text + " \u00b7 " + summary.Text;
+                if (Node.FoldedCount > 0) caption += " \u00b7 Collapsed branch";
                 if (warning != "") caption += " \u00b7 " + warning;
                 ToolTip = caption;
                 AutomationProperties.SetName(this, caption);
