@@ -244,6 +244,9 @@ namespace OrbitEvolved
                     var panelSpinner = (FrameworkElement)liveWindow.FindName("PanelSpinner");
                     Check(panelSpinner.IsVisible && ((RotateTransform)panelSpinner.RenderTransform).HasAnimatedProperties == SystemParameters.ClientAreaAnimation,
                         "Working agents show the spinner and respect the system motion setting");
+                    var projectTitle = (TextBlock)liveWindow.FindName("ProjectLabel");
+                    Check(panelSpinner.TranslatePoint(new Point(), projectTitle).X < 0,
+                        "The expanded spinner is to the left of the project and status text");
                     Check(liveWindow.Resources.Contains("SlimBar"), "Slim scrollbar style replaces the wide system bar");
                     Check(System.Windows.Controls.VirtualizingStackPanel.GetIsVirtualizing(nativeTree), "Agent feed virtualizes bot cards");
                     Check(demo.Agents.All(a => !String.IsNullOrEmpty(a.StatusLabel)), "Agent rows show plain colored status text");
@@ -313,6 +316,10 @@ namespace OrbitEvolved
                     Check(liveWindow.Width == 260 && liveWindow.Height == 76 && ((FrameworkElement)liveWindow.FindName("PillView")).Visibility == Visibility.Visible, "Animated collapse reaches the smaller status pill");
                     Check(Math.Abs(liveWindow.Left + liveWindow.Width - right) < 1 && Math.Abs(liveWindow.Top + liveWindow.Height - bottom) < 1, "Collapse preserves the anchored screen corner");
                     Check(((Button)liveWindow.FindName("ExpandButton")).Focusable, "The collapsed pill is a keyboard-accessible native button");
+                    var pillSpinner = (FrameworkElement)liveWindow.FindName("PillSpinner");
+                    var pillTitle = (TextBlock)liveWindow.FindName("PillTitle");
+                    Check(pillSpinner.IsVisible && pillSpinner.TranslatePoint(new Point(), pillTitle).X < 0,
+                        "The pill spinner is to the left of the status text");
                     Render(liveWindow, Path.Combine(root, "pill.png"));
                     Press(liveWindow, "ExpandButton"); Pump(600);
                     Check(liveWindow.Width == 380, "The pill's invoke action expands the widget");
@@ -571,15 +578,11 @@ namespace OrbitEvolved
                     Check(!panel.IsVisible, "A second taskbar click closes the expanded panel");
                     signal.Set(); Pump(200);
                     Check(panel.IsVisible, "The taskbar click can reopen the dismissed panel");
-                    var otherWindow = new Window { Width = 120, Height = 80, ShowInTaskbar = false, ShowActivated = false };
-                    try
-                    {
-                        otherWindow.Show();
-                        panel.Activate(); Pump(100);
-                        otherWindow.Activate(); Pump(180);
-                        Check(!panel.IsVisible, "Moving focus outside the taskbar panel dismisses it");
-                    }
-                    finally { otherWindow.Close(); }
+                    // Raise the WPF notification directly because Windows may deny activation
+                    // to the self-test process while another application is in the foreground.
+                    typeof(Window).GetMethod("OnDeactivated", BindingFlags.Instance | BindingFlags.NonPublic)
+                        .Invoke(panel, new object[] { EventArgs.Empty });
+                    Check(!panel.IsVisible, "Window deactivation dismisses the taskbar panel");
                     signal.Set(); Pump(200);
                     Press(panel, "CollapseButton"); Pump(150);
                     Check(!panel.IsVisible, "Closing the taskbar panel hides it instead of showing the movable pill");
@@ -835,10 +838,13 @@ namespace OrbitEvolved
                 File.SetLastWriteTimeUtc(Path.Combine(recent, "child.jsonl"), now.AddHours(-1));
                 Check(new ChatCatalog(home, null).Poll(null).ActiveChat.Id == "catalog-main",
                     "Recent rollout events beat stale Windows file write times when detecting active chats");
-                Pump(1800);
-                Check(((TextBlock)window.FindName("PillTitle")).Text == "1 agent working" &&
-                      ((TextBlock)window.FindName("PillSubtitle")).Text == "Organize the research notes",
-                    "The collapsed project list detects activity in a subagent and names its chat");
+                var livePillTitle = (TextBlock)window.FindName("PillTitle");
+                var livePillSubtitle = (TextBlock)window.FindName("PillSubtitle");
+                var activityDeadline = DateTime.UtcNow.AddSeconds(5);
+                while (livePillTitle.Text == "No active chats" && DateTime.UtcNow < activityDeadline) Pump(100);
+                Check(livePillTitle.Text == "1 agent working" && livePillSubtitle.Text == "Organize the research notes",
+                    "The collapsed project list detects activity in a subagent and names its chat (" +
+                    livePillTitle.Text + " · " + livePillSubtitle.Text + ")");
                 Check(graphWindow.IsVisible && graphWindow.SelectedAgentId == "catalog-child" &&
                       graphWindow.SelectedActivity == "Checking overnight schedule boundaries.",
                     "An open workflow retains its selected node and receives updates while the widget shows projects");

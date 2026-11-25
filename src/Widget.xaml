@@ -120,13 +120,13 @@
           <Grid.RowDefinitions><RowDefinition Height="50"/><RowDefinition Height="*"/><RowDefinition Height="30"/></Grid.RowDefinitions>
           <Grid x:Name="DragHeader" Background="Transparent" Cursor="SizeAll"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <Border Grid.ColumnSpan="2" BorderBrush="#22FFFFFF" BorderThickness="0,0,0,1"/>
-            <StackPanel VerticalAlignment="Center" Margin="1,0,9,0">
-              <TextBlock x:Name="ProjectLabel" Text="subagent-view" Foreground="#F4F6FB" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-              <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
-                <Path x:Name="PanelSpinner" Style="{StaticResource WorkingSpinner}" Margin="0,0,5,0"><Path.RenderTransform><RotateTransform/></Path.RenderTransform></Path>
-                <TextBlock x:Name="SummaryTitle" Text="Waiting for agents" Foreground="#AEB7C5" FontSize="10" VerticalAlignment="Center"/>
+            <DockPanel VerticalAlignment="Center" Margin="1,0,9,0">
+              <Path x:Name="PanelSpinner" DockPanel.Dock="Left" Style="{StaticResource WorkingSpinner}" Margin="0,0,7,0"><Path.RenderTransform><RotateTransform/></Path.RenderTransform></Path>
+              <StackPanel>
+                <TextBlock x:Name="ProjectLabel" Text="subagent-view" Foreground="#F4F6FB" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                <TextBlock x:Name="SummaryTitle" Text="Waiting for agents" Foreground="#AEB7C5" FontSize="10" Margin="0,3,0,0"/>
               </StackPanel>
-            </StackPanel>
+            </DockPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"><Button x:Name="SettingsButton" Style="{StaticResource IconButton}" ToolTip="Settings" AutomationProperties.Name="Widget settings"><TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE713;" FontSize="12"/></Button><Button x:Name="CollapseButton" Style="{StaticResource IconButton}" ToolTip="Collapse · Esc" AutomationProperties.Name="Collapse widget"><Path Data="M 0,0 L 9,0" Stroke="#C4C4C4" StrokeThickness="1"/></Button></StackPanel>
           </Grid>
           <Grid Grid.Row="1" Margin="-3,5,-3,5" x:Name="ContentArea">
@@ -208,13 +208,13 @@
         <Grid x:Name="PillView" Visibility="Collapsed" Margin="10,0">
           <Button x:Name="ExpandButton" Background="Transparent" Style="{StaticResource TextButton}" Height="Auto" HorizontalContentAlignment="Stretch" Padding="1,0" AutomationProperties.Name="Expand Orbit E(volved) agent activity">
             <Grid>
-              <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="20"/></Grid.ColumnDefinitions>
-              <StackPanel VerticalAlignment="Center">
+              <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <Path x:Name="PillSpinner" Grid.Column="0" Style="{StaticResource WorkingSpinner}" Margin="0,0,8,0"><Path.RenderTransform><RotateTransform/></Path.RenderTransform></Path>
+              <StackPanel Grid.Column="1" VerticalAlignment="Center">
                 <TextBlock x:Name="PillTitle" Text="Agents working" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
                 <TextBlock x:Name="PillSubtitle" Text="Orbit E(volved)" FontSize="10" Foreground="#B8B8B8" Margin="0,2,0,0" TextTrimming="CharacterEllipsis"/>
               </StackPanel>
-              <TextBlock x:Name="PillOpenGlyph" Grid.Column="1" Text="↗" Foreground="#CCCCCC" FontSize="14" VerticalAlignment="Center" HorizontalAlignment="Center"/>
-              <Path x:Name="PillSpinner" Grid.Column="1" Style="{StaticResource WorkingSpinner}" HorizontalAlignment="Center"><Path.RenderTransform><RotateTransform/></Path.RenderTransform></Path>
+              <TextBlock x:Name="PillOpenGlyph" Grid.Column="2" Width="20" Text="↗" TextAlignment="Center" Foreground="#CCCCCC" FontSize="14" VerticalAlignment="Center"/>
             </Grid>
           </Button>
         </Grid>

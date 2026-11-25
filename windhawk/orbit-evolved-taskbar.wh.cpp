@@ -2,7 +2,7 @@
 // @id orbit-evolved-taskbar
 // @name Orbit E(volved) Taskbar
 // @description Local Codex activity in the Windows 11 taskbar's Widgets area.
-// @version 0.1.4
+// @version 0.1.5
 // @author ArmaanLeg3nd
 // @github https://github.com/ArmaanLeg3nd/orbit-e
 // @include explorer.exe
@@ -41,7 +41,7 @@ The taskbar host lookup is adapted from the MIT-licensed
   $description: Logical pixels (96–256). Orbit hides if the chosen width would overlap native buttons.
 - horizontalOffset: 4
   $name: Horizontal offset
-  $description: Distance from the left edge in logical pixels (0–96).
+  $description: Move left with a negative value or right with a positive value (−96 to 96 logical pixels). Orbit keeps enough of the button on screen to click.
 - verticalOffset: 0
   $name: Vertical offset
   $description: Move up with a negative value or down with a positive value (−16 to 16 logical pixels). The button stays inside the taskbar.
@@ -80,6 +80,7 @@ constexpr wchar_t kStop[] = L"Local\\OrbitEvolved.Taskbar.Stop";
 constexpr size_t kTextUnits = 256;
 constexpr int kDefaultButtonWidth = 144;
 constexpr int kDefaultHorizontalOffset = 4;
+constexpr int kMinimumVisibleButtonWidth = 64;
 constexpr double kNativeButtonGap = 4;
 constexpr double kButtonHeight = 32;
 constexpr UINT_PTR kTimer = 0x4F524254;
@@ -321,7 +322,7 @@ void RefreshTaskbar(HWND hwnd) {
     if (displaySettingsChanged.exchange(false)) {
         int width = Wh_GetIntSetting(L"buttonWidth");
         buttonWidth = width == 0 ? kDefaultButtonWidth : std::clamp(width, 96, 256);
-        horizontalOffset = std::clamp(Wh_GetIntSetting(L"horizontalOffset"), 0, 96);
+        horizontalOffset = std::clamp(Wh_GetIntSetting(L"horizontalOffset"), -96, 96);
         verticalOffset = std::clamp(Wh_GetIntSetting(L"verticalOffset"), -16, 16);
         headlineOnly = Wh_GetIntSetting(L"headlineOnly") != 0;
         hideWhenIdle = Wh_GetIntSetting(L"hideWhenIdle") != 0;
@@ -343,7 +344,6 @@ void RefreshTaskbar(HWND hwnd) {
         Button button;
         button.Name(L"OrbitEvolvedTaskbarButton");
         button.Height(kButtonHeight);
-        button.Padding({6, 0, 6, 0});
         button.MinHeight(0);
         button.HorizontalContentAlignment(HorizontalAlignment::Stretch);
         button.Visibility(Visibility::Collapsed);
@@ -356,6 +356,7 @@ void RefreshTaskbar(HWND hwnd) {
         Grid::SetRowSpan(slot, Grid::GetRowSpan(repeater));
         slot.Children().Append(button);
         StackPanel label;
+        label.VerticalAlignment(VerticalAlignment::Center);
         headline = TextBlock();
         caption = TextBlock();
         headline.FontSize(12);
@@ -370,28 +371,27 @@ void RefreshTaskbar(HWND hwnd) {
         ColumnDefinition activityColumn;
         textColumn.Width({1, GridUnitType::Star});
         activityColumn.Width({1, GridUnitType::Auto});
-        content.ColumnDefinitions().Append(textColumn);
         content.ColumnDefinitions().Append(activityColumn);
+        content.ColumnDefinitions().Append(textColumn);
+        Grid::SetColumn(label, 1);
         content.Children().Append(label);
         activityRing = ProgressRing();
         activityRing.Width(16);
         activityRing.Height(16);
         activityRing.MinWidth(0);
         activityRing.MinHeight(0);
-        activityRing.Margin({5, 0, 0, 0});
+        activityRing.Margin({0, 0, 6, 0});
         activityRing.VerticalAlignment(VerticalAlignment::Center);
         activityRing.IsHitTestVisible(false);
         activityRing.Visibility(Visibility::Collapsed);
-        Grid::SetColumn(activityRing, 1);
         content.Children().Append(activityRing);
         activityDot = TextBlock();
         activityDot.Text(L"●");
         activityDot.FontSize(9);
-        activityDot.Margin({5, 0, 3, 0});
+        activityDot.Margin({0, 0, 7, 0});
         activityDot.VerticalAlignment(VerticalAlignment::Center);
         activityDot.IsHitTestVisible(false);
         activityDot.Visibility(Visibility::Collapsed);
-        Grid::SetColumn(activityDot, 1);
         content.Children().Append(activityDot);
         button.Content(content);
         clicked = button.Click([](auto const&, auto const&) {
@@ -403,19 +403,23 @@ void RefreshTaskbar(HWND hwnd) {
         grid.Children().Append(slot);
         Wh_Log(L"Attached Orbit to the primary taskbar XAML layout");
     }
-    double slotWidth = horizontalOffset + buttonWidth + kNativeButtonGap;
+    int left = std::max(horizontalOffset, kMinimumVisibleButtonWidth - buttonWidth);
+    double slotWidth = left + buttonWidth + kNativeButtonGap;
     if (!HasRoomForOrbit(repeater, slotWidth)) {
         ShowActivity(0);
         orbitButton.Visibility(Visibility::Collapsed);
         return;
     }
     if (orbitButton.Width() != buttonWidth) orbitButton.Width(buttonWidth);
+    // Keep the spinner and text in the visible part of a negatively offset button.
+    Thickness padding{6.0 + std::max(0, -left), 0, 6, 0};
+    if (orbitButton.Padding() != padding) orbitButton.Padding(padding);
     auto captionVisibility = headlineOnly ? Visibility::Collapsed : Visibility::Visible;
     if (caption.Visibility() != captionVisibility) caption.Visibility(captionVisibility);
     double verticalSpace = orbitSlot.ActualHeight() - kButtonHeight;
     double top = std::clamp(verticalSpace / 2 + verticalOffset, 0.0, verticalSpace);
-    if (Canvas::GetLeft(orbitButton) != horizontalOffset)
-        Canvas::SetLeft(orbitButton, horizontalOffset);
+    if (Canvas::GetLeft(orbitButton) != left)
+        Canvas::SetLeft(orbitButton, left);
     if (Canvas::GetTop(orbitButton) != top)
         Canvas::SetTop(orbitButton, top);
     RefreshStatus();
