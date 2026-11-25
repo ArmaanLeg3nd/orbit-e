@@ -241,6 +241,9 @@ namespace OrbitEvolved
                     previewGraph.Close();
                     var nativeTree = (TreeView)liveWindow.FindName("AgentTreeView");
                     Check(liveWindow.IsVisible && Flatten(nativeTree.Items.Cast<TreeNode>()).Count(n => n.Kind == "agent") == 4, "Native tree starts with all four preview agents");
+                    var panelSpinner = (FrameworkElement)liveWindow.FindName("PanelSpinner");
+                    Check(panelSpinner.IsVisible && ((RotateTransform)panelSpinner.RenderTransform).HasAnimatedProperties == SystemParameters.ClientAreaAnimation,
+                        "Working agents show the spinner and respect the system motion setting");
                     Check(liveWindow.Resources.Contains("SlimBar"), "Slim scrollbar style replaces the wide system bar");
                     Check(System.Windows.Controls.VirtualizingStackPanel.GetIsVirtualizing(nativeTree), "Agent feed virtualizes bot cards");
                     Check(demo.Agents.All(a => !String.IsNullOrEmpty(a.StatusLabel)), "Agent rows show plain colored status text");
@@ -271,6 +274,8 @@ namespace OrbitEvolved
                     Render(liveWindow, Path.Combine(root, "detail.png"));
                     Press(liveWindow, "BackButton"); Press(liveWindow, "SettingsButton"); Pump(230);
                     Check(((FrameworkElement)liveWindow.FindName("SettingsView")).Visibility == Visibility.Visible, "Settings open inside the same window");
+                    Check(!((RotateTransform)panelSpinner.RenderTransform).HasAnimatedProperties,
+                        "The spinner stops animating when its view is hidden");
                     var attention = (CheckBox)liveWindow.FindName("AttentionCheck");
                     attention.IsChecked = true;
                     attention.RaiseEvent(new RoutedEventArgs(CheckBox.ClickEvent, attention));

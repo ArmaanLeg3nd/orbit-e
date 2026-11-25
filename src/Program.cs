@@ -138,6 +138,11 @@ namespace OrbitEvolved
             if (options.AllProjects) catalog = new ChatCatalog(options.CatalogHome, options.Sessions);
             using (var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("OrbitEvolved.Widget.xaml")) Window = (Window)XamlReader.Load(stream);
             LoadPreferences();
+            foreach (var name in new[] { "PillSpinner", "PanelSpinner" })
+            {
+                var spinner = Find<FrameworkElement>(name);
+                spinner.IsVisibleChanged += delegate { RefreshSpinner(spinner); };
+            }
             Find<TreeView>("AgentTreeView").ItemsSource = tree.Roots;
             Find<TreeView>("AgentTreeView").AddHandler(Button.ClickEvent, new RoutedEventHandler(delegate(object sender, RoutedEventArgs e)
             {
@@ -176,6 +181,8 @@ namespace OrbitEvolved
             {
                 gentleMotion = Find<CheckBox>("MotionCheck").IsChecked == true;
                 if (graph != null) graph.GentleMotion = gentleMotion;
+                RefreshSpinner(Find<FrameworkElement>("PillSpinner"));
+                RefreshSpinner(Find<FrameworkElement>("PanelSpinner"));
                 SavePreferences();
             };
             Find<CheckBox>("AttentionCheck").Click += delegate { popAttention = Find<CheckBox>("AttentionCheck").IsChecked == true; SavePreferences(); };
@@ -274,6 +281,7 @@ namespace OrbitEvolved
             Visible("CatalogTools", false);
             Visible("EmptyState", false);
             Text("SummaryTitle", "Loading…");
+            Visible("PanelSpinner", false);
             Text("SourceLabel", "Reading local activity…");
             SetModeLabels();
             Poll();
@@ -298,12 +306,20 @@ namespace OrbitEvolved
                 Window.Dispatcher.BeginInvoke(new Action(delegate
                 {
                     polling = false;
-                    if (closing || version != generation || preview) return;
+                    if (closing || preview) { var observed = task.Exception; return; }
+                    if (version != generation)
+                    {
+                        var observed = task.Exception;
+                        Poll();
+                        return;
+                    }
                     if (task.IsFaulted)
                     {
                         var observed = task.Exception;
                         foreach (var agent in agents) { agent.State = "idle"; agent.Task = "Activity unavailable · retrying"; agent.Ended = agent.Updated; agent.Notify(); }
                         Text("SourceLabel", "Activity unavailable · retrying"); Text("SummaryTitle", "Reconnecting"); Text("PillTitle", "Activity unavailable"); tree.Refresh();
+                        ShowPillActivity(false);
+                        Visible("PanelSpinner", false);
                         if (detailId != null) RefreshDetail();
                         if (graph != null && graphChatId == graphChat) ShowGraphUnavailable(false);
                     }
@@ -378,6 +394,8 @@ namespace OrbitEvolved
                 }
             }
             var working = agents.Count(a => a.State == "working");
+            ShowPillActivity(working > 0);
+            Visible("PanelSpinner", working > 0);
             var waiting = agents.Count(a => a.State == "waiting" || a.State == "attention" || a.State == "error");
             var done = agents.Count(a => a.State == "completed");
             var title = waiting > 0 && agents.Any(a => a.State == "attention" || a.State == "error") ? "Your team needs you" : working > 0 ? working + (working == 1 ? " agent working" : " agents working") : agents.Count > 0 && done == agents.Count ? "All work wrapped up" : waiting > 0 ? "Waiting on the next step" : agents.Count > 0 ? "Your team is quiet" : "Ready for your team";
@@ -403,6 +421,9 @@ namespace OrbitEvolved
         private void UpdateCatalogPill(Snapshot snapshot)
         {
             var entries = snapshot.ActiveChatEntries;
+            bool working = entries.Any(entry => entry.Activity == ChatActivity.Working);
+            ShowPillActivity(working);
+            if (current.Chats != null) Visible("PanelSpinner", working);
             var target = pillState.Target;
             var title = target == null ? "No active chats" : target.Status;
             var subtitle = target == null ? snapshot.Project : target.Chat.Title;
@@ -563,6 +584,27 @@ namespace OrbitEvolved
             try { Clipboard.SetText((preview ? "[Preview data]\r\n" : "") + text); Find<Button>("CopyButton").Content = "Copied ✓"; }
             catch (System.Runtime.InteropServices.ExternalException) { Find<Button>("CopyButton").Content = "Clipboard busy · try again"; }
         }
+        private bool AnimateActivity { get { return gentleMotion && SystemParameters.ClientAreaAnimation; } }
+
+        private void ShowPillActivity(bool working)
+        {
+            Visible("PillSpinner", working);
+            Visible("PillOpenGlyph", !working);
+        }
+
+        private void RefreshSpinner(FrameworkElement spinner)
+        {
+            var rotation = (RotateTransform)spinner.RenderTransform;
+            if (!spinner.IsVisible || !AnimateActivity)
+            {
+                rotation.BeginAnimation(RotateTransform.AngleProperty, null);
+                return;
+            }
+            if (!rotation.HasAnimatedProperties)
+                rotation.BeginAnimation(RotateTransform.AngleProperty,
+                    new DoubleAnimation(0, 360, TimeSpan.FromMilliseconds(1050)) { RepeatBehavior = RepeatBehavior.Forever });
+        }
+
         private void FadeIn(UIElement target)
         {
             if (gentleMotion) target.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(200)));
