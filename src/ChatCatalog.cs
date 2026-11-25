@@ -92,7 +92,7 @@ namespace OrbitEvolved
 
         public Snapshot Poll(string selected) { return Poll(selected, null); }
 
-        internal Snapshot Poll(string selected, string retain)
+        internal Snapshot Poll(string selected, string retain, string alsoRetain = null)
         {
             var now = utcNow();
             if (now >= nextScan)
@@ -122,6 +122,7 @@ namespace OrbitEvolved
             var keep = new HashSet<string>(recent.Select(item => item.Id), StringComparer.Ordinal);
             observedActive.IntersectWith(keep);
             if (retain != null && teams.ContainsKey(retain)) keep.Add(retain);
+            if (alsoRetain != null && teams.ContainsKey(alsoRetain)) keep.Add(alsoRetain);
             foreach (var id in readers.Keys.Where(id => !keep.Contains(id)).ToList()) readers.Remove(id);
             foreach (var item in recent)
             {

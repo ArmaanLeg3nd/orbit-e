@@ -1,0 +1,372 @@
+// ==WindhawkMod==
+// @id orbit-evolved-taskbar
+// @name Orbit E(volved) Taskbar
+// @description Local Codex activity in the Windows 11 taskbar's Widgets area.
+// @version 0.1.0
+// @author ArmaanLeg3nd
+// @github https://github.com/ArmaanLeg3nd/orbit-e
+// @include explorer.exe
+// @architecture x86-64
+// @compilerOptions -lcomctl32 -lole32 -lshell32 -luser32 -lwindowsapp -luuid
+// ==/WindhawkMod==
+
+// ==WindhawkModReadme==
+/*
+# Orbit E(volved) Taskbar
+Adds a status button to the primary Windows 11 taskbar, at the Widgets end.
+Turn Windows Widgets off for this slot. The Orbit E(volved) companion reads
+local Codex rollout files and opens the workflow panel when you click.
+
+Set Companion executable to the full path of the taskbar branch's
+Orbit E(volved).exe. With an empty setting the mod looks for it in
+%LOCALAPPDATA%\OrbitEvolved\Windhawk. The floating release uses a separate
+instance and can be closed independently.
+
+The taskbar host lookup is adapted from the MIT-licensed
+[Taskbar Media Widget by uMk0](https://windhawk.net/mods/taskbar-media-widget).
+*/
+// ==/WindhawkModReadme==
+
+// ==WindhawkModSettings==
+/*
+- companionPath: ""
+  $name: Companion executable
+  $description: Full path to Orbit E(volved).exe built from the orbit-windhawk branch.
+*/
+// ==/WindhawkModSettings==
+
+#include <windhawk_utils.h>
+#include <windows.h>
+#include <shlobj.h>
+#undef GetCurrentTime
+#include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Foundation.Collections.h>
+#include <winrt/Windows.UI.Xaml.Automation.h>
+#include <winrt/Windows.UI.Xaml.Controls.h>
+#include <winrt/Windows.UI.Xaml.Controls.Primitives.h>
+#include <winrt/Windows.UI.Xaml.Media.h>
+#include <atomic>
+#include <cstring>
+#include <string>
+
+using namespace winrt;
+using namespace Windows::UI::Xaml;
+using namespace Windows::UI::Xaml::Controls;
+
+namespace {
+constexpr wchar_t kStatus[] = L"Local\\OrbitEvolved.Taskbar.Status";
+constexpr wchar_t kShow[] = L"Local\\OrbitEvolved.Taskbar.Show";
+constexpr wchar_t kStop[] = L"Local\\OrbitEvolved.Taskbar.Stop";
+constexpr size_t kTextUnits = 256;
+constexpr double kSlotWidth = 152;
+constexpr UINT_PTR kTimer = 0x4F524254;
+
+void* taskBandSiteVtable;
+using GetHost = void* (WINAPI*)(void*, void**);
+GetHost getHost;
+void* frameHeight;
+using ReleaseHost = void (WINAPI*)(void*);
+ReleaseHost releaseHost;
+HMODULE taskbarModule;
+HANDLE stopWorker;
+HANDLE worker;
+UINT attachMessage;
+UINT detachMessage;
+std::atomic<bool> stopping;
+Grid parentGrid{nullptr};
+FrameworkElement taskButtons{nullptr};
+Button orbitButton{nullptr};
+TextBlock headline{nullptr};
+TextBlock caption{nullptr};
+event_token clicked{};
+Thickness originalMargin{};
+Thickness orbitMargin{};
+ULONGLONG nextLaunch;
+
+bool OwnedTaskbar(HWND hwnd) {
+    DWORD process = 0;
+    return hwnd && GetWindowThreadProcessId(hwnd, &process) &&
+        process == GetCurrentProcessId();
+}
+
+bool Readable(void const* ptr, size_t count) {
+    MEMORY_BASIC_INFORMATION info{};
+    if (!ptr || !VirtualQuery(ptr, &info, sizeof(info)) || info.State != MEM_COMMIT ||
+        (info.Protect & (PAGE_GUARD | PAGE_NOACCESS))) return false;
+    auto offset = reinterpret_cast<uintptr_t>(ptr) - reinterpret_cast<uintptr_t>(info.BaseAddress);
+    return offset <= info.RegionSize && count <= info.RegionSize - offset;
+}
+
+// Resolve the ABI from the matching Explorer symbols. Unknown layouts fail closed.
+XamlRoot FindTaskbarRoot(HWND hwnd) {
+    auto bandWindow = reinterpret_cast<HWND>(GetPropW(hwnd, L"TaskbandHWND"));
+    if (!OwnedTaskbar(bandWindow)) return nullptr;
+    auto slots = reinterpret_cast<void**>(GetWindowLongPtrW(bandWindow, 0));
+    void* site = nullptr;
+    if (!slots) return nullptr;
+    for (unsigned i = 0; i != 20; ++i) {
+        if (!Readable(slots + i, sizeof(void*))) break;
+        if (slots[i] == taskBandSiteVtable) { site = slots + i; break; }
+    }
+    auto code = static_cast<unsigned char const*>(frameHeight);
+    if (!site || !Readable(code, 8) ||
+        code[0] != 0x48 || code[1] != 0x83 || code[2] != 0xEC ||
+        code[4] != 0x48 || code[5] != 0x83 || code[6] != 0xC1 ||
+        code[7] < 0x10 || code[7] > 0x78 || code[7] % sizeof(void*) != 0) return nullptr;
+
+    struct HostReference {
+        void* values[2]{};
+        ~HostReference() { if (values[1]) releaseHost(values[1]); }
+    } host;
+    getHost(site, host.values);
+    if (!host.values[0]) return nullptr;
+    auto view = reinterpret_cast<::IUnknown**>(static_cast<unsigned char*>(host.values[0]) + code[7]);
+    if (!Readable(view, sizeof(*view)) || !Readable(*view, sizeof(void*))) return nullptr;
+
+    FrameworkElement element{nullptr};
+    if (FAILED((*view)->QueryInterface(guid_of<FrameworkElement>(), put_abi(element))) || !element)
+        return nullptr;
+    return element.XamlRoot();
+}
+
+FrameworkElement FindElement(DependencyObject const& root, std::wstring_view name, bool byClass = false, int depth = 20) {
+    if (!root || depth == 0) return nullptr;
+    auto element = root.try_as<FrameworkElement>();
+    if (element && (byClass ? get_class_name(element) == name : element.Name() == name))
+        return element;
+    int count = Media::VisualTreeHelper::GetChildrenCount(root);
+    for (int i = 0; i < count; ++i)
+        if (auto match = FindElement(Media::VisualTreeHelper::GetChild(root, i), name, byClass, depth - 1))
+            return match;
+    return nullptr;
+}
+
+bool Signal(wchar_t const* name) {
+    auto event = OpenEventW(EVENT_MODIFY_STATE, FALSE, name);
+    if (!event) return false;
+    bool sent = SetEvent(event);
+    CloseHandle(event);
+    return sent;
+}
+
+std::wstring CompanionPath() {
+    auto setting = Wh_GetStringSetting(L"companionPath");
+    std::wstring path = setting ? setting : L"";
+    if (setting) Wh_FreeStringSetting(setting);
+    if (path.empty()) {
+        PWSTR folder = nullptr;
+        if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &folder))) {
+            path = folder;
+            CoTaskMemFree(folder);
+            path += L"\\OrbitEvolved\\Windhawk\\Orbit E(volved).exe";
+        }
+    }
+    auto separator = path.find_last_of(L"\\/");
+    if (path.size() < 4 || path[1] != L':' || (path[2] != L'\\' && path[2] != L'/') ||
+        path.find(L'"') != std::wstring::npos || separator == std::wstring::npos ||
+        _wcsicmp(path.c_str() + separator + 1, L"Orbit E(volved).exe") != 0)
+        return {};
+    DWORD attributes = GetFileAttributesW(path.c_str());
+    return attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_DIRECTORY) ? path : L"";
+}
+
+void StartCompanion(bool open) {
+    if (open && Signal(kShow)) return;
+    auto now = GetTickCount64();
+    if (!open && now < nextLaunch) return;
+    nextLaunch = now + 15000;
+    auto path = CompanionPath();
+    if (path.empty()) return;
+    auto command = L"\"" + path + (open ? L"\" --taskbar-open" : L"\" --taskbar");
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION process{};
+    if (CreateProcessW(path.c_str(), command.data(), nullptr, nullptr, FALSE, 0, nullptr,
+                       nullptr, &startup, &process)) {
+        CloseHandle(process.hThread);
+        CloseHandle(process.hProcess);
+    }
+}
+
+bool ReadStatus(std::wstring& title, std::wstring& detail) {
+    auto map = OpenFileMappingW(FILE_MAP_READ, FALSE, kStatus);
+    if (!map) return false;
+    constexpr size_t bytes = sizeof(LONG) + sizeof(wchar_t) * kTextUnits * 2;
+    auto address = static_cast<unsigned char const*>(MapViewOfFile(map, FILE_MAP_READ, 0, 0, bytes));
+    bool read = false;
+    if (address) {
+        auto sequence = reinterpret_cast<LONG const volatile*>(address);
+        LONG before = *sequence;
+        if (before && !(before & 1)) {
+            MemoryBarrier();
+            wchar_t fields[kTextUnits * 2];
+            memcpy(fields, address + sizeof(LONG), sizeof(fields));
+            MemoryBarrier();
+            if (before == *sequence) {
+                fields[kTextUnits - 1] = fields[kTextUnits * 2 - 1] = L'\0';
+                title = fields;
+                detail = fields + kTextUnits;
+                read = true;
+            }
+        }
+        UnmapViewOfFile(address);
+    }
+    CloseHandle(map);
+    return read;
+}
+
+void RefreshStatus() {
+    std::wstring title, detail;
+    if (!ReadStatus(title, detail)) {
+        StartCompanion(false);
+        title = L"Orbit";
+        detail = L"Open agent activity";
+    }
+    if (headline.Text() != title) headline.Text(title);
+    if (caption.Text() != detail) caption.Text(detail);
+    auto accessible = L"Orbit: " + title + (detail.empty() ? L"" : L". " + detail);
+    if (Automation::AutomationProperties::GetName(orbitButton) != accessible) {
+        Automation::AutomationProperties::SetName(orbitButton, accessible);
+        ToolTipService::SetToolTip(orbitButton, box_value(hstring(accessible)));
+    }
+}
+
+void Detach() {
+    if (orbitButton) orbitButton.Click(clicked);
+    if (parentGrid && orbitButton) {
+        uint32_t index;
+        auto children = parentGrid.Children();
+        if (children.IndexOf(orbitButton, index)) children.RemoveAt(index);
+    }
+    if (taskButtons && taskButtons.Margin() == orbitMargin) taskButtons.Margin(originalMargin);
+    orbitButton = nullptr;
+    parentGrid = nullptr;
+    taskButtons = nullptr;
+    headline = nullptr;
+    caption = nullptr;
+}
+
+void RefreshTaskbar(HWND hwnd) {
+    auto xaml = FindTaskbarRoot(hwnd);
+    auto frame = xaml ? FindElement(xaml.Content(), L"Taskbar.TaskbarFrame", true) : nullptr;
+    auto repeater = FindElement(frame, L"TaskbarFrameRepeater");
+    auto grid = repeater ? Media::VisualTreeHelper::GetParent(repeater).try_as<Grid>() : nullptr;
+    RECT bounds{};
+    GetClientRect(hwnd, &bounds);
+    auto widgets = FindElement(repeater, L"AugmentedEntryPointButton");
+    if (!grid || bounds.right <= bounds.bottom ||
+        (widgets && widgets.Visibility() == Visibility::Visible && widgets.ActualWidth() > 1)) {
+        if (orbitButton) Detach();
+        return;
+    }
+    if (parentGrid != grid) Detach();
+    if (!orbitButton) {
+        Button button;
+        button.Name(L"OrbitEvolvedTaskbarButton");
+        button.HorizontalAlignment(HorizontalAlignment::Left);
+        button.VerticalAlignment(VerticalAlignment::Center);
+        button.Width(kSlotWidth - 8);
+        button.Padding({6, 0, 6, 0});
+        button.MinHeight(0);
+        button.Margin({4, 0, 0, 0});
+        Grid::SetColumn(button, Grid::GetColumn(repeater));
+        Grid::SetRow(button, Grid::GetRow(repeater));
+        StackPanel label;
+        headline = TextBlock();
+        caption = TextBlock();
+        headline.FontSize(12);
+        caption.FontSize(10);
+        caption.Opacity(0.8);
+        headline.TextTrimming(TextTrimming::CharacterEllipsis);
+        caption.TextTrimming(TextTrimming::CharacterEllipsis);
+        label.Children().Append(headline);
+        label.Children().Append(caption);
+        button.Content(label);
+        clicked = button.Click([](auto const&, auto const&) {
+            try { StartCompanion(true); } catch (...) { Wh_Log(L"Could not open Orbit"); }
+        });
+        parentGrid = grid;
+        taskButtons = repeater;
+        orbitButton = button;
+        originalMargin = repeater.Margin();
+        orbitMargin = originalMargin;
+        orbitMargin.Left += kSlotWidth;
+        repeater.Margin(orbitMargin);
+        grid.Children().Append(button);
+        Wh_Log(L"Attached Orbit to the primary taskbar XAML layout");
+    }
+    RefreshStatus();
+}
+
+LRESULT CALLBACK TaskbarSubclass(HWND hwnd, UINT message, WPARAM wp, LPARAM lp, DWORD_PTR) {
+    if (message == detachMessage || message == WM_NCDESTROY) {
+        KillTimer(hwnd, kTimer);
+        try { Detach(); } catch (...) { Wh_Log(L"Orbit taskbar detach failed"); }
+    } else if (!stopping && (message == attachMessage || (message == WM_TIMER && wp == kTimer))) {
+        if (message == attachMessage) SetTimer(hwnd, kTimer, 1000, nullptr);
+        try { RefreshTaskbar(hwnd); }
+        catch (hresult_error const& error) { Wh_Log(L"Orbit taskbar update failed: 0x%08X", (unsigned)error.code()); }
+        catch (...) { Wh_Log(L"Orbit taskbar update failed"); }
+        return 0;
+    }
+    return DefSubclassProc(hwnd, message, wp, lp);
+}
+
+DWORD WINAPI WatchTaskbar(void*) {
+    HWND attached = nullptr;
+    do {
+        auto hwnd = FindWindowW(L"Shell_TrayWnd", nullptr);
+        if (hwnd != attached && OwnedTaskbar(hwnd) &&
+            WindhawkUtils::SetWindowSubclassFromAnyThread(hwnd, TaskbarSubclass, 0)) {
+            attached = hwnd;
+            PostMessageW(hwnd, attachMessage, 0, 0);
+        }
+    } while (WaitForSingleObject(stopWorker, 1000) == WAIT_TIMEOUT);
+    if (OwnedTaskbar(attached)) {
+        SendMessageW(attached, detachMessage, 0, 0);
+        WindhawkUtils::RemoveWindowSubclassFromAnyThread(attached, TaskbarSubclass);
+    }
+    return 0;
+}
+} // namespace
+
+BOOL Wh_ModInit() {
+    if (auto shell = GetShellWindow(); shell && !OwnedTaskbar(shell)) return FALSE;
+    taskbarModule = LoadLibraryExW(L"taskbar.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (!taskbarModule) return FALSE;
+    WindhawkUtils::SYMBOL_HOOK symbols[] = {
+        {{LR"(const CTaskBand::`vftable'{for `ITaskListWndSite'})"}, &taskBandSiteVtable},
+        {{LR"(public: virtual class std::shared_ptr<class TaskbarHost> __cdecl CTaskBand::GetTaskbarHost(void)const )"}, &getHost},
+        {{LR"(public: int __cdecl TaskbarHost::FrameHeight(void)const )"}, &frameHeight},
+        {{LR"(public: void __cdecl std::_Ref_count_base::_Decref(void))"}, &releaseHost},
+    };
+    if (!WindhawkUtils::HookSymbols(taskbarModule, symbols, ARRAYSIZE(symbols))) {
+        FreeLibrary(taskbarModule);
+        return FALSE;
+    }
+    attachMessage = RegisterWindowMessageW(L"OrbitEvolved_Taskbar_Attach");
+    detachMessage = RegisterWindowMessageW(L"OrbitEvolved_Taskbar_Detach");
+    stopWorker = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!stopWorker || !attachMessage || !detachMessage) {
+        if (stopWorker) CloseHandle(stopWorker);
+        FreeLibrary(taskbarModule);
+        return FALSE;
+    }
+    return TRUE;
+}
+
+void Wh_ModAfterInit() {
+    worker = CreateThread(nullptr, 0, WatchTaskbar, nullptr, 0, nullptr);
+}
+
+void Wh_ModUninit() {
+    stopping = true;
+    SetEvent(stopWorker);
+    if (worker) {
+        WaitForSingleObject(worker, INFINITE);
+        CloseHandle(worker);
+    }
+    CloseHandle(stopWorker);
+    Signal(kStop);
+    FreeLibrary(taskbarModule);
+}

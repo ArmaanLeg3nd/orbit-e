@@ -18,6 +18,10 @@ cd orbit-evolved
 
 The build writes `bin/Orbit E(volved).exe`. For a preview with simulated agents, run `.\build.ps1 -Run -Demo`. To run the parser and Windows UI checks, use `.\build.ps1 -Test`.
 
+## Windhawk taskbar mode
+
+The `orbit-windhawk` branch includes a native Windows 11 taskbar button and the matching Orbit companion. See [Windhawk setup](windhawk/README.md).
+
 ## Using Orbit E(volved)
 
 - **Browse your chats.** Open a project group and choose a chat. Orbit E(volved) includes local archives, groups automatically dated workspaces under **Projectless chats**, and hides setup-only duplicates when a matching chat contains activity. The arrow on a chat row opens that conversation in Codex Desktop.

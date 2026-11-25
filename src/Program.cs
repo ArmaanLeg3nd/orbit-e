@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
@@ -25,6 +26,7 @@ namespace OrbitEvolved
         public bool Demo;
         public bool Test;
         public bool AllProjects;
+        internal bool Taskbar, OpenTaskbar;
         public string Workspace;
         internal string CatalogHome = ActivityReader.CodexHome();
         public string Session = "";
@@ -44,6 +46,8 @@ namespace OrbitEvolved
                 else if (args[i] == "--live") Demo = false;
                 else if (args[i] == "--all-projects") allProjectsRequested = true;
                 else if (args[i] == "--self-test") Test = true;
+                else if (args[i] == "--taskbar") Taskbar = true;
+                else if (args[i] == "--taskbar-open") { Taskbar = true; OpenTaskbar = true; }
                 else if (args[i] == "--workspace" && i + 1 < args.Length) { Workspace = Path.GetFullPath(args[++i]); workspaceSelected = true; }
                 else if (args[i] == "--session" && i + 1 < args.Length) Session = args[++i];
                 else if (args[i] == "--events" && i + 1 < args.Length) Events = Path.GetFullPath(args[++i]);
@@ -63,14 +67,28 @@ namespace OrbitEvolved
                 var options = new Options(args);
                 if (options.Test) return SelfTests.Run();
                 bool created;
-                using (var mutex = new Mutex(true, @"Local\OrbitEvolved.AgentWidget", out created))
-                using (var wake = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\OrbitEvolved.AgentWidget.Show"))
+                var instance = options.Taskbar ? TaskbarBridge.Instance : @"Local\OrbitEvolved.AgentWidget";
+                using (var mutex = new Mutex(true, instance, out created))
+                using (var wake = new EventWaitHandle(false, EventResetMode.AutoReset, instance + ".Show"))
                 {
-                    if (!created) { wake.Set(); return 0; }
+                    if (!created)
+                    {
+                        if (!options.Taskbar || options.OpenTaskbar) wake.Set();
+                        return 0;
+                    }
                     var app = new Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
-                    var widget = new Widget(options, wake);
-                    app.Run(widget.Window);
-                    GC.KeepAlive(widget);
+                    using (var bridge = options.Taskbar ? new TaskbarBridge() : null)
+                    {
+                        var widget = new Widget(options, wake, bridge);
+                        if (options.Taskbar)
+                        {
+                            app.MainWindow = widget.Window;
+                            if (options.OpenTaskbar) wake.Set();
+                            app.Run();
+                        }
+                        else app.Run(widget.Window);
+                        GC.KeepAlive(widget);
+                    }
                     mutex.ReleaseMutex();
                 }
                 return 0;
@@ -89,6 +107,7 @@ namespace OrbitEvolved
         public readonly Window Window;
         private readonly Options options;
         private readonly EventWaitHandle wake;
+        private readonly TaskbarBridge bridge;
         private readonly ActivityReader reader;
         private readonly ChatCatalog catalog;
         private readonly DemoFeed demo = new DemoFeed();
@@ -131,9 +150,12 @@ namespace OrbitEvolved
         private void Click(string name, Action action) { Find<Button>(name).Click += delegate { action(); }; }
         private void Visible(string name, bool visible) { Find<FrameworkElement>(name).Visibility = visible ? Visibility.Visible : Visibility.Collapsed; }
 
-        public Widget(Options settings, EventWaitHandle signal)
+        public Widget(Options settings, EventWaitHandle signal) : this(settings, signal, null) { }
+
+        internal Widget(Options settings, EventWaitHandle signal, TaskbarBridge bridge)
         {
             options = settings; wake = signal; preview = settings.Demo;
+            this.bridge = bridge;
             reader = new ActivityReader(options.Workspace, options.Session, options.Events, options.Sessions);
             if (options.AllProjects) catalog = new ChatCatalog(options.CatalogHome, options.Sessions);
             using (var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("OrbitEvolved.Widget.xaml")) Window = (Window)XamlReader.Load(stream);
@@ -184,7 +206,17 @@ namespace OrbitEvolved
                 var enabled = Find<CheckBox>("StartupCheck").IsChecked == true;
                 RefreshStartupSetting(options.Startup.SetEnabled(enabled));
             };
-            Find<Grid>("DragHeader").MouseLeftButtonDown += HeaderDrag;
+            if (options.Taskbar)
+            {
+                Find<Grid>("DragHeader").Cursor = Cursors.Arrow;
+                Find<Button>("CollapseButton").ToolTip = "Close taskbar panel (Esc)";
+                System.Windows.Automation.AutomationProperties.SetName(Find<Button>("CollapseButton"), "Close taskbar panel");
+                Visible("CornerSettings", false);
+                Visible("StartupCheck", false);
+                Visible("AttentionCheck", false);
+                Window.Deactivated += delegate { if (graph == null && !closing) HideTaskbarPanel(); };
+            }
+            else Find<Grid>("DragHeader").MouseLeftButtonDown += HeaderDrag;
             var pill = Find<Button>("ExpandButton");
             pill.PreviewMouseLeftButtonDown += delegate(object sender, MouseButtonEventArgs e) { dragStart = e.GetPosition(Window); dragMoved = false; };
             pill.PreviewMouseMove += delegate(object sender, MouseEventArgs e)
@@ -202,7 +234,7 @@ namespace OrbitEvolved
                 else if ((e.Key == Key.Enter || e.Key == Key.Space) && collapsed) { OpenFromPill(); e.Handled = true; }
                 else if (e.Key == Key.Q && Keyboard.Modifiers == ModifierKeys.Control) { Quit(); e.Handled = true; }
             };
-            Window.Closing += delegate { closing = true; timer.Stop(); tray.Visible = false; tray.Dispose(); trayIcon.Dispose(); };
+            Window.Closing += delegate { closing = true; timer.Stop(); if (tray != null) tray.Dispose(); trayIcon.Dispose(); };
             Window.SourceInitialized += delegate { PlaceCorner(); };
             Window.Loaded += delegate
             {
@@ -212,7 +244,9 @@ namespace OrbitEvolved
             };
             trayIcon = MakeIcon();
             Window.Icon = Imaging.CreateBitmapSourceFromHIcon(trayIcon.Handle, Int32Rect.Empty, System.Windows.Media.Imaging.BitmapSizeOptions.FromEmptyOptions());
-            tray = new Forms.NotifyIcon { Icon = trayIcon, Text = Product.Name + " · Agent activity", Visible = true };
+            if (!options.Taskbar)
+            {
+                tray = new Forms.NotifyIcon { Icon = trayIcon, Text = Product.Name + " · Agent activity", Visible = true };
             var menu = new Forms.ContextMenuStrip();
             menu.Items.Add("Show " + Product.Name, null, delegate { Window.Dispatcher.BeginInvoke(new Action(ShowWidget)); });
             menu.Items.Add("Collapse / expand", null, delegate { Window.Dispatcher.BeginInvoke(new Action(delegate { Window.Show(); ToggleCollapsed(); })); });
@@ -224,10 +258,16 @@ namespace OrbitEvolved
             menu.Items.Add("Quit " + Product.Name, null, delegate { Window.Dispatcher.BeginInvoke(new Action(Quit)); });
             tray.ContextMenuStrip = menu;
             tray.MouseClick += delegate(object sender, Forms.MouseEventArgs e) { if (e.Button == Forms.MouseButtons.Left) Window.Dispatcher.BeginInvoke(new Action(ShowWidget)); };
+            }
             timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
             timer.Tick += delegate
             {
-                if (wake.WaitOne(0)) ShowWidget();
+                if (bridge != null && bridge.StopRequested) { Quit(); return; }
+                if (wake.WaitOne(0))
+                {
+                    if (options.Taskbar) OpenTaskbarPanel();
+                    else ShowWidget();
+                }
                 tick++;
                 if (tick % 3 == 0) Poll();
             };
@@ -291,7 +331,8 @@ namespace OrbitEvolved
             {
                 var main = catalog == null ? reader.Poll() : catalog.Poll(chat, graphChat);
                 var extra = catalog != null && graphChat != null && graphChat != chat ? catalog.Poll(graphChat) : null;
-                return Tuple.Create(main, extra);
+                var overview = options.Taskbar && catalog != null && main.Chats == null ? catalog.Poll(null, chat, graphChat) : null;
+                return Tuple.Create(main, extra, overview);
             }).ContinueWith(task =>
             {
                 if (closing || Window.Dispatcher.HasShutdownStarted) { var observed = task.Exception; return; }
@@ -310,6 +351,12 @@ namespace OrbitEvolved
                     else
                     {
                         Apply(task.Result.Item1);
+                        if (task.Result.Item3 != null)
+                        {
+                            catalogSnapshot = task.Result.Item3;
+                            pillState.Observe(catalogSnapshot);
+                            UpdateCatalogPill(catalogSnapshot);
+                        }
                         if (graph != null && graphChatId == graphChat)
                         {
                             if (task.Result.Item2 != null) UpdateGraph(task.Result.Item2);
@@ -398,7 +445,8 @@ namespace OrbitEvolved
                 OpenGraph();
             }
             else if (graph != null && graphChatId == selectedChat) UpdateGraph(snapshot);
-            tray.Text = Json.Clean(Product.Name + " · " + (preview ? "Preview · " : "") + title, 63);
+            if (tray != null) tray.Text = Json.Clean(Product.Name + " · " + (preview ? "Preview · " : "") + title, 63);
+            if (bridge != null && (preview || catalog == null)) bridge.Publish(title, snapshot.Project);
         }
         private void UpdateCatalogPill(Snapshot snapshot)
         {
@@ -434,7 +482,8 @@ namespace OrbitEvolved
                 targetLabel += ", " + subtitle;
             button.ToolTip = targetLabel;
             System.Windows.Automation.AutomationProperties.SetName(button, targetLabel);
-            tray.Text = Json.Clean(Product.Name + " · " + title, 63);
+            if (tray != null) tray.Text = Json.Clean(Product.Name + " · " + title, 63);
+            if (bridge != null) bridge.Publish(title, subtitle);
         }
         private static string StatusCount(int count, string singular, string plural)
         {
@@ -579,7 +628,7 @@ namespace OrbitEvolved
         {
             var handle = new WindowInteropHelper(Window).Handle;
             if (handle == IntPtr.Zero) return SystemParameters.WorkArea;
-            var screen = Forms.Screen.FromHandle(handle).WorkingArea;
+            var screen = (options.Taskbar ? Forms.Screen.PrimaryScreen : Forms.Screen.FromHandle(handle)).WorkingArea;
             var source = PresentationSource.FromVisual(Window);
             var matrix = source != null && source.CompositionTarget != null ? source.CompositionTarget.TransformFromDevice : Matrix.Identity;
             return new Rect(matrix.Transform(new Point(screen.Left, screen.Top)), matrix.Transform(new Point(screen.Right, screen.Bottom)));
@@ -588,11 +637,28 @@ namespace OrbitEvolved
         {
             if (animating) return;
             var area = WorkArea();
-            var x = corner % 2 == 0 ? area.Left + 8 : area.Right - Window.Width - 8;
-            var y = corner < 2 ? area.Top + 8 : area.Bottom - Window.Height - 8;
+            var x = options.Taskbar || corner % 2 == 0 ? area.Left + 8 : area.Right - Window.Width - 8;
+            var top = options.Taskbar ? TaskbarAtTop() : corner < 2;
+            var y = top ? area.Top + 8 : area.Bottom - Window.Height - 8;
             Window.Left = Math.Max(area.Left, x); Window.Top = Math.Max(area.Top, y);
             StyleSelections();
         }
+        private static bool TaskbarAtTop()
+        {
+            var taskbar = FindWindow("Shell_TrayWnd", null);
+            NativeRect bounds;
+            var screen = Forms.Screen.PrimaryScreen.Bounds;
+            return taskbar != IntPtr.Zero && GetWindowRect(taskbar, out bounds) &&
+                bounds.Top < screen.Top + screen.Height / 2;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct NativeRect { public int Left, Top, Right, Bottom; }
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern IntPtr FindWindow(string className, string windowName);
+        [DllImport("user32.dll")]
+        private static extern bool GetWindowRect(IntPtr window, out NativeRect bounds);
+
         private void SnapAfterDrag()
         {
             var area = WorkArea();
@@ -604,6 +670,7 @@ namespace OrbitEvolved
         }
         private void ToggleCollapsed()
         {
+            if (options.Taskbar) { HideTaskbarPanel(); return; }
             if (animating) return;
             collapsed = !collapsed; detailId = null;
             if (collapsed && !preview && catalog != null && selectedChat != null)
@@ -651,6 +718,24 @@ namespace OrbitEvolved
                 SelectChat(pillState.Target.Chat.Id);
             RequestExpand();
         }
+        private void OpenTaskbarPanel()
+        {
+            if (Window.IsVisible) { HideTaskbarPanel(); return; }
+            Back();
+            var target = preview ? null : pillState.Target;
+            if (target != null) SelectChat(target.Chat.Id);
+            Window.Show();
+            PlaceCorner();
+            Window.Activate();
+        }
+
+        private void HideTaskbarPanel()
+        {
+            if (!Window.IsVisible) return;
+            Window.Hide();
+            if (selectedChat != null) SelectChat(null);
+        }
+
         private void ShowWidget() { Window.Show(); RequestExpand(); Window.Activate(); Back(); }
         private void Quit() { closing = true; Window.Close(); Application.Current.Shutdown(); }
         private void LoadPreferences()

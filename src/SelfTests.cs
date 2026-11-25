@@ -334,6 +334,7 @@ namespace OrbitEvolved
                 CheckProjectCatalog(root);
                 CheckQualityOfLifeCatalog(root);
                 CheckCompletionPill(root);
+                CheckTaskbarBridge(root);
                 CheckQualityOfLifeGraph(root);
                 report.Add("\n" + count + " checks passed.\nArtifacts: " + root);
             }
@@ -512,6 +513,41 @@ namespace OrbitEvolved
             clock = finishedAt.AddMinutes(2);
             Check(catalog.Poll(null).ActiveChatEntries.All(entry => entry.Chat.Id != inputId),
                 "Done expires two minutes after the recorded completion");
+        }
+
+        private static void CheckTaskbarBridge(string root)
+        {
+            var name = TaskbarBridge.Instance + ".Test." + Guid.NewGuid().ToString("N");
+            using (var signal = new EventWaitHandle(false, EventResetMode.AutoReset))
+            using (var bridge = new TaskbarBridge(name))
+            using (var map = System.IO.MemoryMappedFiles.MemoryMappedFile.OpenExisting(name + ".Status"))
+            using (var view = map.CreateViewAccessor(0, 0, System.IO.MemoryMappedFiles.MemoryMappedFileAccess.Read))
+            {
+                bridge.Publish("Done", "Reviewed résumé ✓");
+                var fields = new ushort[512];
+                view.ReadArray(4, fields, 0, fields.Length);
+                Check(view.ReadInt32(0) > 0 && view.ReadInt32(0) % 2 == 0 &&
+                      new string(fields.Take(256).TakeWhile(code => code != 0).Select(code => (char)code).ToArray()) == "Done" &&
+                      new string(fields.Skip(256).TakeWhile(code => code != 0).Select(code => (char)code).ToArray()) == "Reviewed résumé ✓",
+                    "Taskbar publishes complete UTF-16 status records, including completion text");
+                var revision = view.ReadInt32(0);
+                bridge.Publish("Done", "Reviewed résumé ✓");
+                Check(view.ReadInt32(0) == revision, "An unchanged taskbar status does not rewrite the shared record");
+                var widget = new Widget(new Options(new[] { "--taskbar", "--demo", "--workspace", root }), signal, bridge);
+                var panel = widget.Window;
+                try
+                {
+                    Check(!panel.IsVisible, "Taskbar mode starts without a floating window");
+                    signal.Set(); Pump(720);
+                    Check(panel.IsVisible && !panel.ShowInTaskbar && !((FrameworkElement)panel.FindName("PillView")).IsVisible,
+                        "A taskbar click opens only the anchored panel");
+                    Press(panel, "CollapseButton"); Pump(150);
+                    Check(!panel.IsVisible, "Closing the taskbar panel hides it instead of showing the movable pill");
+                }
+                finally { panel.Close(); }
+                using (var stop = EventWaitHandle.OpenExisting(name + ".Stop")) stop.Set();
+                Check(bridge.StopRequested, "The Windhawk unload signal is scoped to the taskbar companion");
+            }
         }
 
         private static void CheckCompletionPill(string root)
