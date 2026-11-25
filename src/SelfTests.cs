@@ -541,6 +541,22 @@ namespace OrbitEvolved
                     signal.Set(); Pump(720);
                     Check(panel.IsVisible && !panel.ShowInTaskbar && !((FrameworkElement)panel.FindName("PillView")).IsVisible,
                         "A taskbar click opens only the anchored panel");
+                    Press(panel, "SettingsButton");
+                    panel.UpdateLayout();
+                    Check(((FrameworkElement)panel.FindName("TaskbarPositionSettings")).IsVisible,
+                        "Panel offsets are available in taskbar settings");
+                    var left = panel.Left;
+                    var top = panel.Top;
+                    ((Slider)panel.FindName("PanelHorizontalOffset")).Value = 32;
+                    ((Slider)panel.FindName("PanelTaskbarGap")).Value = 24;
+                    Press(panel, "ApplyPanelPosition");
+                    var savedPosition = Json.Parse(File.ReadAllText(Path.Combine(root, Product.DataDirectory, "taskbar-panel.json")));
+                    Check(Math.Abs(panel.Left - left - 24) < 1 && Math.Abs(Math.Abs(panel.Top - top) - 16) < 1 &&
+                        (int)Json.Get(savedPosition, "horizontalOffset") == 32 && (int)Json.Get(savedPosition, "taskbarGap") == 24,
+                        "Panel offset settings move the open panel and save both values");
+                    Press(panel, "ResetPanelPosition");
+                    Check(Math.Abs(panel.Left - left) < 1 && Math.Abs(panel.Top - top) < 1,
+                        "Reset restores the default expanded panel position");
                     Press(panel, "CollapseButton"); Pump(150);
                     Check(!panel.IsVisible, "Closing the taskbar panel hides it instead of showing the movable pill");
                 }

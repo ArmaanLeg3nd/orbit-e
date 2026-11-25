@@ -137,6 +137,9 @@ namespace OrbitEvolved
         private bool gentleMotion = true;
         private bool popAttention = true;
         private int corner = 3;
+        private const int DefaultPanelOffset = 8;
+        private int panelHorizontalOffset;
+        private int panelTaskbarGap;
         private int tick;
         private int generation;
         private string detailId;
@@ -214,6 +217,15 @@ namespace OrbitEvolved
                 Visible("CornerSettings", false);
                 Visible("StartupCheck", false);
                 Visible("AttentionCheck", false);
+                Visible("TaskbarPositionSettings", true);
+                LoadTaskbarPosition();
+                Click("ApplyPanelPosition", ApplyTaskbarPosition);
+                Click("ResetPanelPosition", delegate
+                {
+                    Find<Slider>("PanelHorizontalOffset").Value = DefaultPanelOffset;
+                    Find<Slider>("PanelTaskbarGap").Value = DefaultPanelOffset;
+                    ApplyTaskbarPosition();
+                });
                 Window.Deactivated += delegate { if (graph == null && !closing) HideTaskbarPanel(); };
             }
             else Find<Grid>("DragHeader").MouseLeftButtonDown += HeaderDrag;
@@ -601,6 +613,11 @@ namespace OrbitEvolved
         private void ShowSettings()
         {
             detailId = null; Visible("ExpandedView", false); Visible("DetailView", false); Visible("SettingsView", true);
+            if (options.Taskbar)
+            {
+                Find<Slider>("PanelHorizontalOffset").Value = panelHorizontalOffset;
+                Find<Slider>("PanelTaskbarGap").Value = panelTaskbarGap;
+            }
             RefreshStartupSetting(null);
             Find<Button>("SettingsBackButton").Focus(); FadeIn(Find<Grid>("SettingsView"));
         }
@@ -637,9 +654,16 @@ namespace OrbitEvolved
         {
             if (animating) return;
             var area = WorkArea();
-            var x = options.Taskbar || corner % 2 == 0 ? area.Left + 8 : area.Right - Window.Width - 8;
-            var top = options.Taskbar ? TaskbarAtTop() : corner < 2;
-            var y = top ? area.Top + 8 : area.Bottom - Window.Height - 8;
+            if (options.Taskbar)
+            {
+                var panelLeft = area.Left + panelHorizontalOffset;
+                var panelTop = TaskbarAtTop() ? area.Top + panelTaskbarGap : area.Bottom - Window.Height - panelTaskbarGap;
+                Window.Left = Math.Max(area.Left, Math.Min(area.Right - Window.Width, panelLeft));
+                Window.Top = Math.Max(area.Top, Math.Min(area.Bottom - Window.Height, panelTop));
+                return;
+            }
+            var x = corner % 2 == 0 ? area.Left + 8 : area.Right - Window.Width - 8;
+            var y = corner < 2 ? area.Top + 8 : area.Bottom - Window.Height - 8;
             Window.Left = Math.Max(area.Left, x); Window.Top = Math.Max(area.Top, y);
             StyleSelections();
         }
@@ -738,6 +762,45 @@ namespace OrbitEvolved
 
         private void ShowWidget() { Window.Show(); RequestExpand(); Window.Activate(); Back(); }
         private void Quit() { closing = true; Window.Close(); Application.Current.Shutdown(); }
+        private string TaskbarPositionPath
+        {
+            get { return Path.Combine(options.Workspace, Product.DataDirectory, "taskbar-panel.json"); }
+        }
+        private void LoadTaskbarPosition()
+        {
+            var horizontal = Find<Slider>("PanelHorizontalOffset");
+            var gap = Find<Slider>("PanelTaskbarGap");
+            try
+            {
+                if (File.Exists(TaskbarPositionPath))
+                {
+                    var position = Json.Parse(File.ReadAllText(TaskbarPositionPath));
+                    var savedHorizontal = Json.Get(position, "horizontalOffset");
+                    var savedGap = Json.Get(position, "taskbarGap");
+                    if (savedHorizontal is int) horizontal.Value = (int)savedHorizontal;
+                    if (savedGap is int) gap.Value = (int)savedGap;
+                }
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            panelHorizontalOffset = (int)horizontal.Value;
+            panelTaskbarGap = (int)gap.Value;
+        }
+        private void ApplyTaskbarPosition()
+        {
+            panelHorizontalOffset = (int)Find<Slider>("PanelHorizontalOffset").Value;
+            panelTaskbarGap = (int)Find<Slider>("PanelTaskbarGap").Value;
+            PlaceCorner();
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(TaskbarPositionPath));
+                File.WriteAllText(TaskbarPositionPath, new JavaScriptSerializer().Serialize(new {
+                    horizontalOffset = panelHorizontalOffset, taskbarGap = panelTaskbarGap
+                }));
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
         private void LoadPreferences()
         {
             gentleMotion = SystemParameters.ClientAreaAnimation;

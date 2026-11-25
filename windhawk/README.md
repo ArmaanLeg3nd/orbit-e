@@ -23,6 +23,8 @@ Open **Windhawk → Orbit E(volved) Taskbar → Settings**. Saved display change
 - **Headline only** hides the second line. Hover over the button to see the full status.
 - **Hide when idle** hides the whole button when there are no active chats or unread completions. Leave it off if you want to open archived or idle chats from the taskbar at any time.
 
+For the expanded panel, open Orbit's gear menu and find **Panel position**. Set the horizontal offset from the left edge and the gap from the taskbar, then choose **Apply**. **Reset** restores the eight-pixel defaults. These controls use the updated companion executable.
+
 Windhawk starts the matching companion in the background. The companion can also be opened with the **--taskbar-open** argument for troubleshooting. Disable the mod in Windhawk to remove the taskbar control and stop the taskbar companion. The floating build has its own instance and remains available on the **orbit-evolved** branch.
 
 Codex rollout parsing stays in the companion. Only the two status lines cross into Explorer over session-local shared memory. The taskbar mod uses Windhawk's symbol lookup for the native XAML taskbar host, so a Windows update can change compatibility. The host discovery approach is adapted from [Taskbar Media Widget by uMk0](https://windhawk.net/mods/taskbar-media-widget), which is MIT-licensed.
