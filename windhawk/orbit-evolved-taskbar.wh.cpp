@@ -2,7 +2,7 @@
 // @id orbit-evolved-taskbar
 // @name Orbit E(volved) Taskbar
 // @description Local Codex activity in the Windows 11 taskbar's Widgets area.
-// @version 0.1.0
+// @version 0.1.1
 // @author ArmaanLeg3nd
 // @github https://github.com/ArmaanLeg3nd/orbit-e
 // @include explorer.exe
@@ -14,7 +14,8 @@
 /*
 # Orbit E(volved) Taskbar
 Adds a status button to the primary Windows 11 taskbar, at the Widgets end.
-Turn Windows Widgets off for this slot. The Orbit E(volved) companion reads
+Turn Windows Widgets off and center the taskbar buttons to leave this slot free.
+The Orbit E(volved) companion reads
 local Codex rollout files and opens the workflow panel when you click.
 
 Set Companion executable to the full path of the taskbar branch's
@@ -59,6 +60,7 @@ constexpr wchar_t kShow[] = L"Local\\OrbitEvolved.Taskbar.Show";
 constexpr wchar_t kStop[] = L"Local\\OrbitEvolved.Taskbar.Stop";
 constexpr size_t kTextUnits = 256;
 constexpr double kSlotWidth = 152;
+constexpr double kButtonHeight = 32;
 constexpr UINT_PTR kTimer = 0x4F524254;
 
 void* taskBandSiteVtable;
@@ -74,13 +76,11 @@ UINT attachMessage;
 UINT detachMessage;
 std::atomic<bool> stopping;
 Grid parentGrid{nullptr};
-FrameworkElement taskButtons{nullptr};
+Canvas orbitSlot{nullptr};
 Button orbitButton{nullptr};
 TextBlock headline{nullptr};
 TextBlock caption{nullptr};
 event_token clicked{};
-Thickness originalMargin{};
-Thickness orbitMargin{};
 ULONGLONG nextLaunch;
 
 bool OwnedTaskbar(HWND hwnd) {
@@ -233,17 +233,34 @@ void RefreshStatus() {
 
 void Detach() {
     if (orbitButton) orbitButton.Click(clicked);
-    if (parentGrid && orbitButton) {
+    if (parentGrid && orbitSlot) {
         uint32_t index;
         auto children = parentGrid.Children();
-        if (children.IndexOf(orbitButton, index)) children.RemoveAt(index);
+        if (children.IndexOf(orbitSlot, index)) children.RemoveAt(index);
     }
-    if (taskButtons && taskButtons.Margin() == orbitMargin) taskButtons.Margin(originalMargin);
     orbitButton = nullptr;
     parentGrid = nullptr;
-    taskButtons = nullptr;
+    orbitSlot = nullptr;
     headline = nullptr;
     caption = nullptr;
+}
+
+bool HasRoomForOrbit(FrameworkElement const& repeater) {
+    if (orbitSlot.ActualWidth() < kSlotWidth || orbitSlot.ActualHeight() < kButtonHeight)
+        return false;
+
+    int count = Media::VisualTreeHelper::GetChildrenCount(repeater);
+    for (int i = 0; i < count; ++i) {
+        auto item = Media::VisualTreeHelper::GetChild(repeater, i).try_as<FrameworkElement>();
+        if (!item || item.Visibility() != Visibility::Visible ||
+            item.ActualWidth() <= 0 || item.ActualHeight() <= 0)
+            continue;
+        auto bounds = item.TransformToVisual(orbitSlot).TransformBounds(
+            {0, 0, static_cast<float>(item.ActualWidth()), static_cast<float>(item.ActualHeight())});
+        if (bounds.X < kSlotWidth && bounds.X + bounds.Width > 0)
+            return false;
+    }
+    return count > 0;
 }
 
 void RefreshTaskbar(HWND hwnd) {
@@ -263,14 +280,20 @@ void RefreshTaskbar(HWND hwnd) {
     if (!orbitButton) {
         Button button;
         button.Name(L"OrbitEvolvedTaskbarButton");
-        button.HorizontalAlignment(HorizontalAlignment::Left);
-        button.VerticalAlignment(VerticalAlignment::Center);
         button.Width(kSlotWidth - 8);
+        button.Height(kButtonHeight);
         button.Padding({6, 0, 6, 0});
         button.MinHeight(0);
-        button.Margin({4, 0, 0, 0});
-        Grid::SetColumn(button, Grid::GetColumn(repeater));
-        Grid::SetRow(button, Grid::GetRow(repeater));
+        button.Visibility(Visibility::Collapsed);
+        // A Canvas measures its children without contributing their size to the
+        // taskbar grid. Its unset background also leaves native hit targets alone.
+        Canvas slot;
+        Canvas::SetLeft(button, 4);
+        Grid::SetColumn(slot, Grid::GetColumn(repeater));
+        Grid::SetRow(slot, Grid::GetRow(repeater));
+        Grid::SetColumnSpan(slot, Grid::GetColumnSpan(repeater));
+        Grid::SetRowSpan(slot, Grid::GetRowSpan(repeater));
+        slot.Children().Append(button);
         StackPanel label;
         headline = TextBlock();
         caption = TextBlock();
@@ -286,15 +309,17 @@ void RefreshTaskbar(HWND hwnd) {
             try { StartCompanion(true); } catch (...) { Wh_Log(L"Could not open Orbit"); }
         });
         parentGrid = grid;
-        taskButtons = repeater;
+        orbitSlot = slot;
         orbitButton = button;
-        originalMargin = repeater.Margin();
-        orbitMargin = originalMargin;
-        orbitMargin.Left += kSlotWidth;
-        repeater.Margin(orbitMargin);
-        grid.Children().Append(button);
+        grid.Children().Append(slot);
         Wh_Log(L"Attached Orbit to the primary taskbar XAML layout");
     }
+    if (!HasRoomForOrbit(repeater)) {
+        orbitButton.Visibility(Visibility::Collapsed);
+        return;
+    }
+    Canvas::SetTop(orbitButton, (orbitSlot.ActualHeight() - kButtonHeight) / 2);
+    orbitButton.Visibility(Visibility::Visible);
     RefreshStatus();
 }
 
