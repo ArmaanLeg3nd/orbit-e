@@ -13,6 +13,7 @@ namespace OrbitEvolved
         private readonly EventWaitHandle stop;
         private int revision;
         private string previousTitle, previousSubtitle;
+        private bool previousWorking, previousAnimations;
 
         public TaskbarBridge(string instance = Instance)
         {
@@ -24,14 +25,22 @@ namespace OrbitEvolved
 
         public bool StopRequested { get { return stop.WaitOne(0); } }
 
-        public void Publish(string title, string subtitle)
+        public void SetAnimations(bool enabled)
+        {
+            Publish(previousTitle, previousSubtitle, previousWorking, enabled);
+        }
+
+        public void Publish(string title, string subtitle, bool working = false, bool animate = true)
         {
             title = Json.Clean(title, TextUnits - 1);
             subtitle = Json.Clean(subtitle, TextUnits - 1);
-            if (title == previousTitle && subtitle == previousSubtitle) return;
+            if (title == previousTitle && subtitle == previousSubtitle &&
+                working == previousWorking && animate == previousAnimations) return;
             var fields = new ushort[TextUnits * 2];
             for (var i = 0; i < title.Length; i++) fields[i] = title[i];
             for (var i = 0; i < subtitle.Length; i++) fields[TextUnits + i] = subtitle[i];
+            // Older readers already terminate the title at this reserved code unit.
+            fields[TextUnits - 1] = working ? (ushort)(animate ? 3 : 2) : (ushort)1;
             view.Write(0, unchecked(++revision));
             Thread.MemoryBarrier();
             view.WriteArray(4, fields, 0, fields.Length);
@@ -39,6 +48,8 @@ namespace OrbitEvolved
             view.Write(0, unchecked(++revision));
             previousTitle = title;
             previousSubtitle = subtitle;
+            previousWorking = working;
+            previousAnimations = animate;
         }
 
         public void Dispose()

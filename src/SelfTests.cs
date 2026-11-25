@@ -241,6 +241,9 @@ namespace OrbitEvolved
                     previewGraph.Close();
                     var nativeTree = (TreeView)liveWindow.FindName("AgentTreeView");
                     Check(liveWindow.IsVisible && Flatten(nativeTree.Items.Cast<TreeNode>()).Count(n => n.Kind == "agent") == 4, "Native tree starts with all four preview agents");
+                    var panelSpinner = (FrameworkElement)liveWindow.FindName("PanelSpinner");
+                    Check(panelSpinner.IsVisible && ((RotateTransform)panelSpinner.RenderTransform).HasAnimatedProperties == SystemParameters.ClientAreaAnimation,
+                        "Working agents show the spinner and respect the system motion setting");
                     Check(liveWindow.Resources.Contains("SlimBar"), "Slim scrollbar style replaces the wide system bar");
                     Check(System.Windows.Controls.VirtualizingStackPanel.GetIsVirtualizing(nativeTree), "Agent feed virtualizes bot cards");
                     Check(demo.Agents.All(a => !String.IsNullOrEmpty(a.StatusLabel)), "Agent rows show plain colored status text");
@@ -271,6 +274,8 @@ namespace OrbitEvolved
                     Render(liveWindow, Path.Combine(root, "detail.png"));
                     Press(liveWindow, "BackButton"); Press(liveWindow, "SettingsButton"); Pump(230);
                     Check(((FrameworkElement)liveWindow.FindName("SettingsView")).Visibility == Visibility.Visible, "Settings open inside the same window");
+                    Check(!((RotateTransform)panelSpinner.RenderTransform).HasAnimatedProperties,
+                        "The spinner stops animating when its view is hidden");
                     var attention = (CheckBox)liveWindow.FindName("AttentionCheck");
                     attention.IsChecked = true;
                     attention.RaiseEvent(new RoutedEventArgs(CheckBox.ClickEvent, attention));
@@ -533,12 +538,17 @@ namespace OrbitEvolved
                 var revision = view.ReadInt32(0);
                 bridge.Publish("Done", "Reviewed résumé ✓");
                 Check(view.ReadInt32(0) == revision, "An unchanged taskbar status does not rewrite the shared record");
+                Check(view.ReadUInt16(4 + 255 * 2) == 1, "Done clears the native activity spinner");
+                bridge.Publish("Working", "Checking output", true);
+                Check(view.ReadUInt16(4 + 255 * 2) == 3, "The taskbar status enables the spinner for working agents");
+                bridge.SetAnimations(false);
+                Check(view.ReadUInt16(4 + 255 * 2) == 2, "Turning off animation keeps an accessible static activity indicator");
                 var widget = new Widget(new Options(new[] { "--taskbar", "--demo", "--workspace", root }), signal, bridge);
                 var panel = widget.Window;
                 try
                 {
                     Check(!panel.IsVisible, "Taskbar mode starts without a floating window");
-                    signal.Set(); Pump(720);
+                    signal.Set(); Pump(200);
                     Check(panel.IsVisible && !panel.ShowInTaskbar && !((FrameworkElement)panel.FindName("PillView")).IsVisible,
                         "A taskbar click opens only the anchored panel");
                     Press(panel, "SettingsButton");
@@ -557,6 +567,20 @@ namespace OrbitEvolved
                     Press(panel, "ResetPanelPosition");
                     Check(Math.Abs(panel.Left - left) < 1 && Math.Abs(panel.Top - top) < 1,
                         "Reset restores the default expanded panel position");
+                    signal.Set(); Pump(200);
+                    Check(!panel.IsVisible, "A second taskbar click closes the expanded panel");
+                    signal.Set(); Pump(200);
+                    Check(panel.IsVisible, "The taskbar click can reopen the dismissed panel");
+                    var otherWindow = new Window { Width = 120, Height = 80, ShowInTaskbar = false, ShowActivated = false };
+                    try
+                    {
+                        otherWindow.Show();
+                        panel.Activate(); Pump(100);
+                        otherWindow.Activate(); Pump(180);
+                        Check(!panel.IsVisible, "Moving focus outside the taskbar panel dismisses it");
+                    }
+                    finally { otherWindow.Close(); }
+                    signal.Set(); Pump(200);
                     Press(panel, "CollapseButton"); Pump(150);
                     Check(!panel.IsVisible, "Closing the taskbar panel hides it instead of showing the movable pill");
                 }

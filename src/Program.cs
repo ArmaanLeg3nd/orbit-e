@@ -125,6 +125,11 @@ namespace OrbitEvolved
         private string graphChatId;
         private Snapshot graphSnapshot;
         private readonly DispatcherTimer timer;
+        private DispatcherTimer taskbarInputTimer;
+        private RegisteredWaitHandle taskbarWake;
+        private bool pointerWasDown;
+        private bool pendingTaskbarDismiss;
+        private DateTime? taskbarDismissAfter;
         private readonly Forms.NotifyIcon tray;
         private readonly Drawing.Icon trayIcon;
         private Snapshot current = new Snapshot();
@@ -163,6 +168,11 @@ namespace OrbitEvolved
             if (options.AllProjects) catalog = new ChatCatalog(options.CatalogHome, options.Sessions);
             using (var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("OrbitEvolved.Widget.xaml")) Window = (Window)XamlReader.Load(stream);
             LoadPreferences();
+            foreach (var name in new[] { "PillSpinner", "PanelSpinner" })
+            {
+                var spinner = Find<FrameworkElement>(name);
+                spinner.IsVisibleChanged += delegate { RefreshSpinner(spinner); };
+            }
             Find<TreeView>("AgentTreeView").ItemsSource = tree.Roots;
             Find<TreeView>("AgentTreeView").AddHandler(Button.ClickEvent, new RoutedEventHandler(delegate(object sender, RoutedEventArgs e)
             {
@@ -201,6 +211,9 @@ namespace OrbitEvolved
             {
                 gentleMotion = Find<CheckBox>("MotionCheck").IsChecked == true;
                 if (graph != null) graph.GentleMotion = gentleMotion;
+                RefreshSpinner(Find<FrameworkElement>("PillSpinner"));
+                RefreshSpinner(Find<FrameworkElement>("PanelSpinner"));
+                if (bridge != null) bridge.SetAnimations(AnimateActivity);
                 SavePreferences();
             };
             Find<CheckBox>("AttentionCheck").Click += delegate { popAttention = Find<CheckBox>("AttentionCheck").IsChecked == true; SavePreferences(); };
@@ -226,7 +239,16 @@ namespace OrbitEvolved
                     Find<Slider>("PanelTaskbarGap").Value = DefaultPanelOffset;
                     ApplyTaskbarPosition();
                 });
-                Window.Deactivated += delegate { if (graph == null && !closing) HideTaskbarPanel(); };
+                Window.ShowActivated = true;
+                taskbarInputTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(40) };
+                taskbarInputTimer.Tick += delegate { CheckTaskbarOutsideClick(); };
+                Window.Deactivated += delegate
+                {
+                    if (graph != null || closing || !Window.IsVisible) return;
+                    if (pendingTaskbarDismiss || (IsTaskbarPoint(Forms.Cursor.Position) && MouseButtonDown(1)))
+                        pendingTaskbarDismiss = true;
+                    else HideTaskbarPanel();
+                };
             }
             else Find<Grid>("DragHeader").MouseLeftButtonDown += HeaderDrag;
             var pill = Find<Button>("ExpandButton");
@@ -246,7 +268,15 @@ namespace OrbitEvolved
                 else if ((e.Key == Key.Enter || e.Key == Key.Space) && collapsed) { OpenFromPill(); e.Handled = true; }
                 else if (e.Key == Key.Q && Keyboard.Modifiers == ModifierKeys.Control) { Quit(); e.Handled = true; }
             };
-            Window.Closing += delegate { closing = true; timer.Stop(); if (tray != null) tray.Dispose(); trayIcon.Dispose(); };
+            Window.Closing += delegate
+            {
+                closing = true;
+                timer.Stop();
+                if (taskbarWake != null) taskbarWake.Unregister(null);
+                if (taskbarInputTimer != null) taskbarInputTimer.Stop();
+                if (tray != null) tray.Dispose();
+                trayIcon.Dispose();
+            };
             Window.SourceInitialized += delegate { PlaceCorner(); };
             Window.Loaded += delegate
             {
@@ -275,15 +305,19 @@ namespace OrbitEvolved
             timer.Tick += delegate
             {
                 if (bridge != null && bridge.StopRequested) { Quit(); return; }
-                if (wake.WaitOne(0))
-                {
-                    if (options.Taskbar) OpenTaskbarPanel();
-                    else ShowWidget();
-                }
+                if (!options.Taskbar && wake.WaitOne(0)) ShowWidget();
                 tick++;
                 if (tick % 3 == 0) Poll();
             };
             timer.Start();
+            if (options.Taskbar)
+                taskbarWake = ThreadPool.RegisterWaitForSingleObject(wake, delegate
+                {
+                    Window.Dispatcher.BeginInvoke(new Action(delegate
+                    {
+                        if (!closing) OpenTaskbarPanel();
+                    }), DispatcherPriority.Input);
+                }, null, Timeout.Infinite, false);
             SetModeLabels();
             StyleSelections();
             Poll();
@@ -326,6 +360,7 @@ namespace OrbitEvolved
             Visible("CatalogTools", false);
             Visible("EmptyState", false);
             Text("SummaryTitle", "Loading…");
+            Visible("PanelSpinner", false);
             Text("SourceLabel", "Reading local activity…");
             SetModeLabels();
             Poll();
@@ -351,12 +386,21 @@ namespace OrbitEvolved
                 Window.Dispatcher.BeginInvoke(new Action(delegate
                 {
                     polling = false;
-                    if (closing || version != generation || preview) return;
+                    if (closing || preview) { var observed = task.Exception; return; }
+                    if (version != generation)
+                    {
+                        var observed = task.Exception;
+                        Poll();
+                        return;
+                    }
                     if (task.IsFaulted)
                     {
                         var observed = task.Exception;
                         foreach (var agent in agents) { agent.State = "idle"; agent.Task = "Activity unavailable · retrying"; agent.Ended = agent.Updated; agent.Notify(); }
                         Text("SourceLabel", "Activity unavailable · retrying"); Text("SummaryTitle", "Reconnecting"); Text("PillTitle", "Activity unavailable"); tree.Refresh();
+                        ShowPillActivity(false);
+                        Visible("PanelSpinner", false);
+                        if (bridge != null) bridge.Publish("Activity unavailable", "Retrying local activity");
                         if (detailId != null) RefreshDetail();
                         if (graph != null && graphChatId == graphChat) ShowGraphUnavailable(false);
                     }
@@ -437,6 +481,8 @@ namespace OrbitEvolved
                 }
             }
             var working = agents.Count(a => a.State == "working");
+            ShowPillActivity(working > 0);
+            Visible("PanelSpinner", working > 0);
             var waiting = agents.Count(a => a.State == "waiting" || a.State == "attention" || a.State == "error");
             var done = agents.Count(a => a.State == "completed");
             var title = waiting > 0 && agents.Any(a => a.State == "attention" || a.State == "error") ? "Your team needs you" : working > 0 ? working + (working == 1 ? " agent working" : " agents working") : agents.Count > 0 && done == agents.Count ? "All work wrapped up" : waiting > 0 ? "Waiting on the next step" : agents.Count > 0 ? "Your team is quiet" : "Ready for your team";
@@ -458,11 +504,14 @@ namespace OrbitEvolved
             }
             else if (graph != null && graphChatId == selectedChat) UpdateGraph(snapshot);
             if (tray != null) tray.Text = Json.Clean(Product.Name + " · " + (preview ? "Preview · " : "") + title, 63);
-            if (bridge != null && (preview || catalog == null)) bridge.Publish(title, snapshot.Project);
+            if (bridge != null && (preview || catalog == null)) bridge.Publish(title, snapshot.Project, working > 0, AnimateActivity);
         }
         private void UpdateCatalogPill(Snapshot snapshot)
         {
             var entries = snapshot.ActiveChatEntries;
+            bool working = entries.Any(entry => entry.Activity == ChatActivity.Working);
+            ShowPillActivity(working);
+            if (current.Chats != null) Visible("PanelSpinner", working);
             var target = pillState.Target;
             var title = target == null ? "No active chats" : target.Status;
             var subtitle = target == null ? snapshot.Project : target.Chat.Title;
@@ -495,7 +544,7 @@ namespace OrbitEvolved
             button.ToolTip = targetLabel;
             System.Windows.Automation.AutomationProperties.SetName(button, targetLabel);
             if (tray != null) tray.Text = Json.Clean(Product.Name + " · " + title, 63);
-            if (bridge != null) bridge.Publish(title, subtitle);
+            if (bridge != null) bridge.Publish(title, subtitle, working, AnimateActivity);
         }
         private static string StatusCount(int count, string singular, string plural)
         {
@@ -629,6 +678,27 @@ namespace OrbitEvolved
             try { Clipboard.SetText((preview ? "[Preview data]\r\n" : "") + text); Find<Button>("CopyButton").Content = "Copied ✓"; }
             catch (System.Runtime.InteropServices.ExternalException) { Find<Button>("CopyButton").Content = "Clipboard busy · try again"; }
         }
+        private bool AnimateActivity { get { return gentleMotion && SystemParameters.ClientAreaAnimation; } }
+
+        private void ShowPillActivity(bool working)
+        {
+            Visible("PillSpinner", working);
+            Visible("PillOpenGlyph", !working);
+        }
+
+        private void RefreshSpinner(FrameworkElement spinner)
+        {
+            var rotation = (RotateTransform)spinner.RenderTransform;
+            if (!spinner.IsVisible || !AnimateActivity)
+            {
+                rotation.BeginAnimation(RotateTransform.AngleProperty, null);
+                return;
+            }
+            if (!rotation.HasAnimatedProperties)
+                rotation.BeginAnimation(RotateTransform.AngleProperty,
+                    new DoubleAnimation(0, 360, TimeSpan.FromMilliseconds(1050)) { RepeatBehavior = RepeatBehavior.Forever });
+        }
+
         private void FadeIn(UIElement target)
         {
             if (gentleMotion) target.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(200)));
@@ -682,6 +752,49 @@ namespace OrbitEvolved
         private static extern IntPtr FindWindow(string className, string windowName);
         [DllImport("user32.dll")]
         private static extern bool GetWindowRect(IntPtr window, out NativeRect bounds);
+        [DllImport("user32.dll")]
+        private static extern short GetAsyncKeyState(int key);
+
+        private static bool MouseButtonDown(int key) { return GetAsyncKeyState(key) < 0; }
+        private static bool AnyMouseButtonDown()
+        {
+            return MouseButtonDown(1) || MouseButtonDown(2) || MouseButtonDown(4) ||
+                MouseButtonDown(5) || MouseButtonDown(6);
+        }
+        private static bool IsTaskbarPoint(Drawing.Point point)
+        {
+            var taskbar = FindWindow("Shell_TrayWnd", null);
+            NativeRect bounds;
+            return taskbar != IntPtr.Zero && GetWindowRect(taskbar, out bounds) &&
+                point.X >= bounds.Left && point.X < bounds.Right && point.Y >= bounds.Top && point.Y < bounds.Bottom;
+        }
+        private void CheckTaskbarOutsideClick()
+        {
+            bool down = AnyMouseButtonDown();
+            bool pressed = down && !pointerWasDown;
+            pointerWasDown = down;
+            if (graph != null || !Window.IsVisible) return;
+            if (pressed)
+            {
+                var pointer = Forms.Cursor.Position;
+                if (!new Rect(0, 0, Window.ActualWidth, Window.ActualHeight)
+                    .Contains(Window.PointFromScreen(new Point(pointer.X, pointer.Y))))
+                {
+                    if (!MouseButtonDown(1) || !IsTaskbarPoint(pointer))
+                    {
+                        HideTaskbarPanel();
+                        return;
+                    }
+                    // Let the native Orbit button toggle the still-open panel on mouse-up.
+                    pendingTaskbarDismiss = true;
+                    taskbarDismissAfter = null;
+                }
+            }
+            if (!pendingTaskbarDismiss || down) return;
+            var now = DateTime.UtcNow;
+            if (!taskbarDismissAfter.HasValue) taskbarDismissAfter = now.AddMilliseconds(160);
+            else if (now >= taskbarDismissAfter.Value) HideTaskbarPanel();
+        }
 
         private void SnapAfterDrag()
         {
@@ -751,11 +864,17 @@ namespace OrbitEvolved
             Window.Show();
             PlaceCorner();
             Window.Activate();
+            pointerWasDown = AnyMouseButtonDown();
+            taskbarInputTimer.Start();
+            FadeIn(Find<Grid>("ExpandedView"));
         }
 
         private void HideTaskbarPanel()
         {
             if (!Window.IsVisible) return;
+            taskbarInputTimer.Stop();
+            pendingTaskbarDismiss = false;
+            taskbarDismissAfter = null;
             Window.Hide();
             if (selectedChat != null) SelectChat(null);
         }

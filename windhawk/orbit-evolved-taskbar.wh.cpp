@@ -2,7 +2,7 @@
 // @id orbit-evolved-taskbar
 // @name Orbit E(volved) Taskbar
 // @description Local Codex activity in the Windows 11 taskbar's Widgets area.
-// @version 0.1.3
+// @version 0.1.4
 // @author ArmaanLeg3nd
 // @github https://github.com/ArmaanLeg3nd/orbit-e
 // @include explorer.exe
@@ -107,6 +107,8 @@ Canvas orbitSlot{nullptr};
 Button orbitButton{nullptr};
 TextBlock headline{nullptr};
 TextBlock caption{nullptr};
+ProgressRing activityRing{nullptr};
+TextBlock activityDot{nullptr};
 event_token clicked{};
 ULONGLONG nextLaunch;
 
@@ -215,7 +217,7 @@ void StartCompanion(bool open) {
     }
 }
 
-bool ReadStatus(std::wstring& title, std::wstring& detail) {
+bool ReadStatus(std::wstring& title, std::wstring& detail, wchar_t& activity) {
     auto map = OpenFileMappingW(FILE_MAP_READ, FALSE, kStatus);
     if (!map) return false;
     constexpr size_t bytes = sizeof(LONG) + sizeof(wchar_t) * kTextUnits * 2;
@@ -230,6 +232,7 @@ bool ReadStatus(std::wstring& title, std::wstring& detail) {
             memcpy(fields, address + sizeof(LONG), sizeof(fields));
             MemoryBarrier();
             if (before == *sequence) {
+                activity = fields[kTextUnits - 1];
                 fields[kTextUnits - 1] = fields[kTextUnits * 2 - 1] = L'\0';
                 title = fields;
                 detail = fields + kTextUnits;
@@ -242,18 +245,34 @@ bool ReadStatus(std::wstring& title, std::wstring& detail) {
     return read;
 }
 
+void ShowActivity(wchar_t activity) {
+    BOOL systemAnimations = TRUE;
+    if (activity == 3)
+        SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &systemAnimations, 0);
+    bool spin = activity == 3 && systemAnimations;
+    bool dot = activity == 2 || (activity == 3 && !systemAnimations);
+    if (activityRing.IsActive() != spin) activityRing.IsActive(spin);
+    auto ringVisibility = spin ? Visibility::Visible : Visibility::Collapsed;
+    auto dotVisibility = dot ? Visibility::Visible : Visibility::Collapsed;
+    if (activityRing.Visibility() != ringVisibility) activityRing.Visibility(ringVisibility);
+    if (activityDot.Visibility() != dotVisibility) activityDot.Visibility(dotVisibility);
+}
+
 void RefreshStatus() {
     std::wstring title, detail;
-    if (!ReadStatus(title, detail)) {
+    wchar_t activity = 0;
+    if (!ReadStatus(title, detail, activity)) {
         StartCompanion(false);
         title = L"Orbit";
         detail = L"Open agent activity";
     }
     // This headline is the idle state published by existing Orbit companions.
     if (hideWhenIdle && title == L"No active chats") {
+        ShowActivity(0);
         orbitButton.Visibility(Visibility::Collapsed);
         return;
     }
+    ShowActivity(activity);
     if (headline.Text() != title) headline.Text(title);
     if (caption.Text() != detail) caption.Text(detail);
     auto accessible = L"Orbit: " + title + (detail.empty() ? L"" : L". " + detail);
@@ -276,6 +295,8 @@ void Detach() {
     orbitSlot = nullptr;
     headline = nullptr;
     caption = nullptr;
+    activityRing = nullptr;
+    activityDot = nullptr;
 }
 
 bool HasRoomForOrbit(FrameworkElement const& repeater, double slotWidth) {
@@ -324,6 +345,7 @@ void RefreshTaskbar(HWND hwnd) {
         button.Height(kButtonHeight);
         button.Padding({6, 0, 6, 0});
         button.MinHeight(0);
+        button.HorizontalContentAlignment(HorizontalAlignment::Stretch);
         button.Visibility(Visibility::Collapsed);
         // A Canvas measures its children without contributing their size to the
         // taskbar grid. Its unset background also leaves native hit targets alone.
@@ -343,7 +365,35 @@ void RefreshTaskbar(HWND hwnd) {
         caption.TextTrimming(TextTrimming::CharacterEllipsis);
         label.Children().Append(headline);
         label.Children().Append(caption);
-        button.Content(label);
+        Grid content;
+        ColumnDefinition textColumn;
+        ColumnDefinition activityColumn;
+        textColumn.Width({1, GridUnitType::Star});
+        activityColumn.Width({1, GridUnitType::Auto});
+        content.ColumnDefinitions().Append(textColumn);
+        content.ColumnDefinitions().Append(activityColumn);
+        content.Children().Append(label);
+        activityRing = ProgressRing();
+        activityRing.Width(16);
+        activityRing.Height(16);
+        activityRing.MinWidth(0);
+        activityRing.MinHeight(0);
+        activityRing.Margin({5, 0, 0, 0});
+        activityRing.VerticalAlignment(VerticalAlignment::Center);
+        activityRing.IsHitTestVisible(false);
+        activityRing.Visibility(Visibility::Collapsed);
+        Grid::SetColumn(activityRing, 1);
+        content.Children().Append(activityRing);
+        activityDot = TextBlock();
+        activityDot.Text(L"●");
+        activityDot.FontSize(9);
+        activityDot.Margin({5, 0, 3, 0});
+        activityDot.VerticalAlignment(VerticalAlignment::Center);
+        activityDot.IsHitTestVisible(false);
+        activityDot.Visibility(Visibility::Collapsed);
+        Grid::SetColumn(activityDot, 1);
+        content.Children().Append(activityDot);
+        button.Content(content);
         clicked = button.Click([](auto const&, auto const&) {
             try { StartCompanion(true); } catch (...) { Wh_Log(L"Could not open Orbit"); }
         });
@@ -355,6 +405,7 @@ void RefreshTaskbar(HWND hwnd) {
     }
     double slotWidth = horizontalOffset + buttonWidth + kNativeButtonGap;
     if (!HasRoomForOrbit(repeater, slotWidth)) {
+        ShowActivity(0);
         orbitButton.Visibility(Visibility::Collapsed);
         return;
     }

@@ -12,6 +12,20 @@
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="6" Padding="{TemplateBinding Padding}"><ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="#19FFFFFF"/><Setter Property="Foreground" Value="White"/></Trigger><Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="#88FFFFFF"/><Setter TargetName="Chrome" Property="BorderThickness" Value="1"/></Trigger><Trigger Property="IsPressed" Value="True"><Setter TargetName="Chrome" Property="Background" Value="#30FFFFFF"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
     </Style>
     <Style x:Key="TextButton" TargetType="Button" BasedOn="{StaticResource IconButton}"><Setter Property="Width" Value="Auto"/><Setter Property="Height" Value="28"/><Setter Property="Padding" Value="8,4"/></Style>
+    <Style x:Key="WorkingSpinner" TargetType="Path">
+      <Setter Property="Data" Value="M 7,1 A 6,6 0 1 1 1,7"/>
+      <Setter Property="Stroke" Value="#D5E0EF"/>
+      <Setter Property="StrokeThickness" Value="1.6"/>
+      <Setter Property="StrokeStartLineCap" Value="Round"/>
+      <Setter Property="StrokeEndLineCap" Value="Round"/>
+      <Setter Property="Width" Value="14"/>
+      <Setter Property="Height" Value="14"/>
+      <Setter Property="Stretch" Value="None"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
+      <Setter Property="IsHitTestVisible" Value="False"/>
+      <Setter Property="Visibility" Value="Collapsed"/>
+      <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+    </Style>
     <Style x:Key="SlimBar" TargetType="ScrollBar">
       <Setter Property="Width" Value="8"/><Setter Property="MinWidth" Value="8"/><Setter Property="Background" Value="Transparent"/><Setter Property="Focusable" Value="False"/>
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ScrollBar"><Border Background="Transparent" Width="8"><Track x:Name="PART_Track" IsDirectionReversed="True" Focusable="False"><Track.DecreaseRepeatButton><RepeatButton Command="ScrollBar.PageUpCommand" Opacity="0" Focusable="False"/></Track.DecreaseRepeatButton><Track.IncreaseRepeatButton><RepeatButton Command="ScrollBar.PageDownCommand" Opacity="0" Focusable="False"/></Track.IncreaseRepeatButton><Track.Thumb><Thumb MinHeight="16"><Thumb.Template><ControlTemplate TargetType="Thumb"><Border Width="3" CornerRadius="1.5" Background="#58FFFFFF" HorizontalAlignment="Center" MinHeight="16"/></ControlTemplate></Thumb.Template></Thumb></Track.Thumb></Track></Border></ControlTemplate></Setter.Value></Setter>
@@ -106,7 +120,13 @@
           <Grid.RowDefinitions><RowDefinition Height="50"/><RowDefinition Height="*"/><RowDefinition Height="30"/></Grid.RowDefinitions>
           <Grid x:Name="DragHeader" Background="Transparent" Cursor="SizeAll"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <Border Grid.ColumnSpan="2" BorderBrush="#22FFFFFF" BorderThickness="0,0,0,1"/>
-            <StackPanel VerticalAlignment="Center" Margin="1,0,9,0"><TextBlock x:Name="ProjectLabel" Text="subagent-view" Foreground="#F4F6FB" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock x:Name="SummaryTitle" Text="Waiting for agents" Foreground="#AEB7C5" FontSize="10" Margin="0,3,0,0"/></StackPanel>
+            <StackPanel VerticalAlignment="Center" Margin="1,0,9,0">
+              <TextBlock x:Name="ProjectLabel" Text="subagent-view" Foreground="#F4F6FB" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+              <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
+                <Path x:Name="PanelSpinner" Style="{StaticResource WorkingSpinner}" Margin="0,0,5,0"><Path.RenderTransform><RotateTransform/></Path.RenderTransform></Path>
+                <TextBlock x:Name="SummaryTitle" Text="Waiting for agents" Foreground="#AEB7C5" FontSize="10" VerticalAlignment="Center"/>
+              </StackPanel>
+            </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"><Button x:Name="SettingsButton" Style="{StaticResource IconButton}" ToolTip="Settings" AutomationProperties.Name="Widget settings"><TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE713;" FontSize="12"/></Button><Button x:Name="CollapseButton" Style="{StaticResource IconButton}" ToolTip="Collapse · Esc" AutomationProperties.Name="Collapse widget"><Path Data="M 0,0 L 9,0" Stroke="#C4C4C4" StrokeThickness="1"/></Button></StackPanel>
           </Grid>
           <Grid Grid.Row="1" Margin="-3,5,-3,5" x:Name="ContentArea">
@@ -186,7 +206,17 @@
           <Button Grid.Row="2" x:Name="QuitButton" Content="Quit Orbit E(volved)" Style="{StaticResource TextButton}" FontSize="11" HorizontalAlignment="Right"/>
         </Grid>
         <Grid x:Name="PillView" Visibility="Collapsed" Margin="10,0">
-          <Button x:Name="ExpandButton" Background="Transparent" Style="{StaticResource TextButton}" Height="Auto" HorizontalContentAlignment="Stretch" Padding="1,0" AutomationProperties.Name="Expand Orbit E(volved) agent activity"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="16"/></Grid.ColumnDefinitions><StackPanel VerticalAlignment="Center"><TextBlock x:Name="PillTitle" Text="Agents working" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock x:Name="PillSubtitle" Text="Orbit E(volved)" FontSize="10" Foreground="#B8B8B8" Margin="0,2,0,0" TextTrimming="CharacterEllipsis"/></StackPanel><TextBlock Grid.Column="1" Text="↗" Foreground="#CCCCCC" FontSize="14" VerticalAlignment="Center"/></Grid></Button>
+          <Button x:Name="ExpandButton" Background="Transparent" Style="{StaticResource TextButton}" Height="Auto" HorizontalContentAlignment="Stretch" Padding="1,0" AutomationProperties.Name="Expand Orbit E(volved) agent activity">
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="20"/></Grid.ColumnDefinitions>
+              <StackPanel VerticalAlignment="Center">
+                <TextBlock x:Name="PillTitle" Text="Agents working" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                <TextBlock x:Name="PillSubtitle" Text="Orbit E(volved)" FontSize="10" Foreground="#B8B8B8" Margin="0,2,0,0" TextTrimming="CharacterEllipsis"/>
+              </StackPanel>
+              <TextBlock x:Name="PillOpenGlyph" Grid.Column="1" Text="↗" Foreground="#CCCCCC" FontSize="14" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+              <Path x:Name="PillSpinner" Grid.Column="1" Style="{StaticResource WorkingSpinner}" HorizontalAlignment="Center"><Path.RenderTransform><RotateTransform/></Path.RenderTransform></Path>
+            </Grid>
+          </Button>
         </Grid>
       </Grid>
     </Border>
