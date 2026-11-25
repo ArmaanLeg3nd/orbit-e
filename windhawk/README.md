@@ -11,7 +11,7 @@ The Orbit companion provides the live status and the Active, All, and workflow v
 3. In Windhawk, select **Create a New Mod** and replace the generated source with **orbit-evolved-taskbar.wh.cpp**. Compile the mod, then enable it.
 4. Keep Windows Widgets off and set **Taskbar alignment** to **Center**. Click the Orbit status on the left of the primary taskbar to open the panel.
 
-To update to version 0.1.5, update the companion executable, then replace the existing Windhawk mod's editor source and compile it again.
+To update to version 0.1.6, use the current companion executable and replace the existing Windhawk mod's editor source, then compile it again. If you already installed the 0.1.5 companion, you can keep it.
 
 ## Customize the taskbar button
 

@@ -2,7 +2,7 @@
 // @id orbit-evolved-taskbar
 // @name Orbit E(volved) Taskbar
 // @description Local Codex activity in the Windows 11 taskbar's Widgets area.
-// @version 0.1.5
+// @version 0.1.6
 // @author ArmaanLeg3nd
 // @github https://github.com/ArmaanLeg3nd/orbit-e
 // @include explorer.exe
@@ -60,12 +60,16 @@ The taskbar host lookup is adapted from the MIT-licensed
 #undef GetCurrentTime
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
+#include <winrt/Windows.UI.Composition.h>
 #include <winrt/Windows.UI.Xaml.Automation.h>
 #include <winrt/Windows.UI.Xaml.Controls.h>
 #include <winrt/Windows.UI.Xaml.Controls.Primitives.h>
+#include <winrt/Windows.UI.Xaml.Hosting.h>
 #include <winrt/Windows.UI.Xaml.Media.h>
+#include <winrt/Windows.UI.Xaml.Shapes.h>
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <string>
 
@@ -108,8 +112,10 @@ Canvas orbitSlot{nullptr};
 Button orbitButton{nullptr};
 TextBlock headline{nullptr};
 TextBlock caption{nullptr};
-ProgressRing activityRing{nullptr};
-TextBlock activityDot{nullptr};
+Shapes::Path activityArc{nullptr};
+Windows::UI::Composition::Visual activityVisual{nullptr};
+Windows::UI::Composition::ScalarKeyFrameAnimation activityRotation{nullptr};
+bool activitySpinning;
 event_token clicked{};
 ULONGLONG nextLaunch;
 
@@ -246,17 +252,69 @@ bool ReadStatus(std::wstring& title, std::wstring& detail, wchar_t& activity) {
     return read;
 }
 
+void StartActivityRotation() {
+    if (!activityRotation) {
+        auto visual = Hosting::ElementCompositionPreview::GetElementVisual(activityArc);
+        visual.CenterPoint({7, 7, 0});
+        auto compositor = visual.Compositor();
+        auto animation = compositor.CreateScalarKeyFrameAnimation();
+        auto linear = compositor.CreateLinearEasingFunction();
+        animation.InsertKeyFrame(0, 0, linear);
+        animation.InsertKeyFrame(1, 360, linear);
+        animation.Duration(std::chrono::milliseconds(1050));
+        animation.IterationBehavior(Windows::UI::Composition::AnimationIterationBehavior::Forever);
+        activityVisual = visual;
+        activityRotation = animation;
+    }
+    activityVisual.StartAnimation(L"RotationAngleInDegrees", activityRotation);
+}
+
 void ShowActivity(wchar_t activity) {
     BOOL systemAnimations = TRUE;
     if (activity == 3)
         SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &systemAnimations, 0);
     bool spin = activity == 3 && systemAnimations;
-    bool dot = activity == 2 || (activity == 3 && !systemAnimations);
-    if (activityRing.IsActive() != spin) activityRing.IsActive(spin);
-    auto ringVisibility = spin ? Visibility::Visible : Visibility::Collapsed;
-    auto dotVisibility = dot ? Visibility::Visible : Visibility::Collapsed;
-    if (activityRing.Visibility() != ringVisibility) activityRing.Visibility(ringVisibility);
-    if (activityDot.Visibility() != dotVisibility) activityDot.Visibility(dotVisibility);
+    auto visibility = activity == 2 || activity == 3 ? Visibility::Visible : Visibility::Collapsed;
+    if (activityArc.Visibility() != visibility) activityArc.Visibility(visibility);
+    if (spin != activitySpinning) {
+        if (spin) {
+            StartActivityRotation();
+        } else {
+            activityVisual.StopAnimation(L"RotationAngleInDegrees");
+            activityVisual.RotationAngleInDegrees(0);
+        }
+        activitySpinning = spin;
+    }
+}
+
+void AddActivityArc(Grid const& content, Button const& button) {
+    // Match Widget.xaml's 14 px rounded arc and the WPF widget's linear rotation.
+    Media::ArcSegment segment;
+    segment.Point({1, 7});
+    segment.Size({6, 6});
+    segment.IsLargeArc(true);
+    segment.SweepDirection(Media::SweepDirection::Clockwise);
+    Media::PathFigure figure;
+    figure.StartPoint({7, 1});
+    figure.Segments().Append(segment);
+    Media::PathGeometry geometry;
+    geometry.Figures().Append(figure);
+
+    Shapes::Path arc;
+    arc.Data(geometry);
+    arc.Stroke(button.Foreground());
+    arc.StrokeThickness(1.6);
+    arc.StrokeStartLineCap(Media::PenLineCap::Round);
+    arc.StrokeEndLineCap(Media::PenLineCap::Round);
+    arc.Stretch(Media::Stretch::None);
+    arc.Width(14);
+    arc.Height(14);
+    arc.Margin({0, 0, 7, 0});
+    arc.VerticalAlignment(VerticalAlignment::Center);
+    arc.IsHitTestVisible(false);
+    arc.Visibility(Visibility::Collapsed);
+    content.Children().Append(arc);
+    activityArc = arc;
 }
 
 void RefreshStatus() {
@@ -273,7 +331,6 @@ void RefreshStatus() {
         orbitButton.Visibility(Visibility::Collapsed);
         return;
     }
-    ShowActivity(activity);
     if (headline.Text() != title) headline.Text(title);
     if (caption.Text() != detail) caption.Text(detail);
     auto accessible = L"Orbit: " + title + (detail.empty() ? L"" : L". " + detail);
@@ -282,9 +339,15 @@ void RefreshStatus() {
         ToolTipService::SetToolTip(orbitButton, box_value(hstring(accessible)));
     }
     orbitButton.Visibility(Visibility::Visible);
+    ShowActivity(activity);
 }
 
 void Detach() {
+    if (activityArc) {
+        try { ShowActivity(0); }
+        catch (...) { Wh_Log(L"Could not stop the Orbit activity arc"); }
+    }
+    activitySpinning = false;
     if (orbitButton) orbitButton.Click(clicked);
     if (parentGrid && orbitSlot) {
         uint32_t index;
@@ -296,8 +359,9 @@ void Detach() {
     orbitSlot = nullptr;
     headline = nullptr;
     caption = nullptr;
-    activityRing = nullptr;
-    activityDot = nullptr;
+    activityArc = nullptr;
+    activityVisual = nullptr;
+    activityRotation = nullptr;
 }
 
 bool HasRoomForOrbit(FrameworkElement const& repeater, double slotWidth) {
@@ -375,24 +439,7 @@ void RefreshTaskbar(HWND hwnd) {
         content.ColumnDefinitions().Append(textColumn);
         Grid::SetColumn(label, 1);
         content.Children().Append(label);
-        activityRing = ProgressRing();
-        activityRing.Width(16);
-        activityRing.Height(16);
-        activityRing.MinWidth(0);
-        activityRing.MinHeight(0);
-        activityRing.Margin({0, 0, 6, 0});
-        activityRing.VerticalAlignment(VerticalAlignment::Center);
-        activityRing.IsHitTestVisible(false);
-        activityRing.Visibility(Visibility::Collapsed);
-        content.Children().Append(activityRing);
-        activityDot = TextBlock();
-        activityDot.Text(L"●");
-        activityDot.FontSize(9);
-        activityDot.Margin({0, 0, 7, 0});
-        activityDot.VerticalAlignment(VerticalAlignment::Center);
-        activityDot.IsHitTestVisible(false);
-        activityDot.Visibility(Visibility::Collapsed);
-        content.Children().Append(activityDot);
+        AddActivityArc(content, button);
         button.Content(content);
         clicked = button.Click([](auto const&, auto const&) {
             try { StartCompanion(true); } catch (...) { Wh_Log(L"Could not open Orbit"); }
