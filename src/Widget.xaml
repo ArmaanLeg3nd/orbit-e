@@ -189,12 +189,12 @@
                 <TextBlock DockPanel.Dock="Right" Foreground="#BDBDBD" Text="{Binding Value, ElementName=PanelHorizontalOffset, StringFormat={}{0:0} px}"/>
                 <TextBlock Text="Horizontal offset"/>
               </DockPanel>
-              <Slider x:Name="PanelHorizontalOffset" Minimum="0" Maximum="128" Value="8" SmallChange="1" LargeChange="8" TickFrequency="1" IsSnapToTickEnabled="True" AutomationProperties.Name="Panel horizontal offset"/>
+              <Slider x:Name="PanelHorizontalOffset" Minimum="-8" Maximum="128" Value="8" SmallChange="1" LargeChange="8" TickFrequency="1" IsSnapToTickEnabled="True" AutomationProperties.Name="Panel horizontal offset"/>
               <DockPanel Margin="0,9,0,4">
                 <TextBlock DockPanel.Dock="Right" Foreground="#BDBDBD" Text="{Binding Value, ElementName=PanelTaskbarGap, StringFormat={}{0:0} px}"/>
                 <TextBlock Text="Gap from taskbar"/>
               </DockPanel>
-              <Slider x:Name="PanelTaskbarGap" Minimum="0" Maximum="96" Value="8" SmallChange="1" LargeChange="8" TickFrequency="1" IsSnapToTickEnabled="True" AutomationProperties.Name="Panel gap from taskbar"/>
+              <Slider x:Name="PanelTaskbarGap" Minimum="-8" Maximum="96" Value="8" SmallChange="1" LargeChange="8" TickFrequency="1" IsSnapToTickEnabled="True" AutomationProperties.Name="Panel gap from taskbar"/>
               <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,6,0,0">
                 <Button x:Name="ResetPanelPosition" Content="Reset" Style="{StaticResource TextButton}"/>
                 <Button x:Name="ApplyPanelPosition" Content="Apply" Style="{StaticResource TextButton}" Margin="4,0,0,0"/>

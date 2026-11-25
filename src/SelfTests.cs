@@ -571,8 +571,24 @@ namespace OrbitEvolved
                     Check(Math.Abs(panel.Left - left - 24) < 1 && Math.Abs(Math.Abs(panel.Top - top) - 16) < 1 &&
                         (int)Json.Get(savedPosition, "horizontalOffset") == 32 && (int)Json.Get(savedPosition, "taskbarGap") == 24,
                         "Panel offset settings move the open panel and save both values");
+                    ((Slider)panel.FindName("PanelHorizontalOffset")).Value = -8;
+                    ((Slider)panel.FindName("PanelTaskbarGap")).Value = -6;
+                    Press(panel, "ApplyPanelPosition");
+                    savedPosition = Json.Parse(File.ReadAllText(Path.Combine(root, Product.DataDirectory, "taskbar-panel.json")));
+                    Check(Math.Abs(panel.Left - left + 16) < 1 && Math.Abs(Math.Abs(panel.Top - top) - 14) < 1 &&
+                        (int)Json.Get(savedPosition, "horizontalOffset") == -8 && (int)Json.Get(savedPosition, "taskbarGap") == -6,
+                        "Negative offsets tuck the expanded panel past its work area and persist");
+                    var clip = panel.Clip.Bounds;
+                    var handle = new System.Windows.Interop.WindowInteropHelper(panel).Handle;
+                    var scale = PresentationSource.FromVisual(panel).CompositionTarget.TransformToDevice;
+                    TestNativeRect region;
+                    Check(Math.Abs(clip.Left - 8) < 1 && Math.Abs(clip.Height - (panel.Height - 6)) < 1 &&
+                        GetWindowRgnBox(handle, out region) == 2 &&
+                        region.Left == (int)Math.Ceiling(8 * scale.M11) && region.Bottom - region.Top <= Math.Ceiling(clip.Height * scale.M22),
+                        "The tucked portion is excluded from the native window region");
                     Press(panel, "ResetPanelPosition");
-                    Check(Math.Abs(panel.Left - left) < 1 && Math.Abs(panel.Top - top) < 1,
+                    Check(Math.Abs(panel.Left - left) < 1 && Math.Abs(panel.Top - top) < 1 && panel.Clip == null &&
+                        GetWindowRgnBox(handle, out region) == 0,
                         "Reset restores the default expanded panel position");
                     signal.Set(); Pump(200);
                     Check(!panel.IsVisible, "A second taskbar click closes the expanded panel");
@@ -927,6 +943,10 @@ namespace OrbitEvolved
         }
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         private static extern IntPtr SendMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+        private struct TestNativeRect { public int Left, Top, Right, Bottom; }
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern int GetWindowRgnBox(IntPtr window, out TestNativeRect rect);
         private static void Pump(int milliseconds)
         {
             var frame = new DispatcherFrame();

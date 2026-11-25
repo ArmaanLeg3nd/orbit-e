@@ -23,7 +23,7 @@ Open **Windhawk → Orbit E(volved) Taskbar → Settings**. Saved display change
 - **Headline only** hides the second line. Hover over the button to see the full status.
 - **Hide when idle** hides the whole button when there are no active chats or unread completions. Leave it off if you want to open archived or idle chats from the taskbar at any time.
 
-For the expanded panel, open Orbit's gear menu and find **Panel position**. Set the horizontal offset from the left edge and the gap from the taskbar, then choose **Apply**. **Reset** restores the eight-pixel defaults. These controls use the updated companion executable.
+For the expanded panel, open Orbit's gear menu and find **Panel position**. Set the horizontal offset from the left edge and the gap from the taskbar, then choose **Apply**. Both accept values down to −8 px to tuck the outer edge past the work area. Orbit clips the tucked edge so the panel stays clear of the taskbar controls. **Reset** restores the eight-pixel defaults. These controls use the updated companion executable.
 
 Windhawk starts the matching companion in the background. The companion can also be opened with the **--taskbar-open** argument for troubleshooting. Disable the mod in Windhawk to remove the taskbar control and stop the taskbar companion. The floating build has its own instance and remains available on the **orbit-evolved** branch.
 

@@ -726,10 +726,18 @@ namespace OrbitEvolved
             var area = WorkArea();
             if (options.Taskbar)
             {
-                var panelLeft = area.Left + panelHorizontalOffset;
-                var panelTop = TaskbarAtTop() ? area.Top + panelTaskbarGap : area.Bottom - Window.Height - panelTaskbarGap;
-                Window.Left = Math.Max(area.Left, Math.Min(area.Right - Window.Width, panelLeft));
-                Window.Top = Math.Max(area.Top, Math.Min(area.Bottom - Window.Height, panelTop));
+                double horizontalRoom = Math.Max(0, area.Width - Window.Width);
+                double verticalRoom = Math.Max(0, area.Height - Window.Height);
+                double gap = Math.Min(panelTaskbarGap, verticalRoom);
+                Window.Left = area.Left + Math.Min(panelHorizontalOffset, horizontalRoom);
+                Window.Top = area.Top + (TaskbarAtTop() ? gap : verticalRoom - gap);
+                var placed = new Rect(Window.Left, Window.Top, Window.Width, Window.Height);
+                var visible = Rect.Intersect(placed, area);
+                // Tuck the panel's edge without drawing or accepting input over the taskbar.
+                visible.Offset(-Window.Left, -Window.Top);
+                Window.Clip = visible.Width == Window.Width && visible.Height == Window.Height
+                    ? null : new RectangleGeometry(visible);
+                ApplyPanelRegion();
                 return;
             }
             var x = corner % 2 == 0 ? area.Left + 8 : area.Right - Window.Width - 8;
@@ -754,6 +762,31 @@ namespace OrbitEvolved
         private static extern bool GetWindowRect(IntPtr window, out NativeRect bounds);
         [DllImport("user32.dll")]
         private static extern short GetAsyncKeyState(int key);
+        [DllImport("user32.dll")]
+        private static extern int SetWindowRgn(IntPtr window, IntPtr region, bool redraw);
+        [DllImport("gdi32.dll")]
+        private static extern IntPtr CreateRectRgn(int left, int top, int right, int bottom);
+        [DllImport("gdi32.dll")]
+        private static extern bool DeleteObject(IntPtr region);
+
+        private void ApplyPanelRegion()
+        {
+            var source = PresentationSource.FromVisual(Window) as HwndSource;
+            if (source == null || source.CompositionTarget == null) return;
+            if (Window.Clip == null)
+            {
+                SetWindowRgn(source.Handle, IntPtr.Zero, true);
+                return;
+            }
+            var transform = source.CompositionTarget.TransformToDevice;
+            var clip = Window.Clip.Bounds;
+            var start = transform.Transform(clip.TopLeft);
+            var end = transform.Transform(clip.BottomRight);
+            var region = CreateRectRgn((int)Math.Ceiling(start.X), (int)Math.Ceiling(start.Y),
+                (int)Math.Floor(end.X), (int)Math.Floor(end.Y));
+            // Windows owns the region after a successful call.
+            if (region != IntPtr.Zero && SetWindowRgn(source.Handle, region, true) == 0) DeleteObject(region);
+        }
 
         private static bool MouseButtonDown(int key) { return GetAsyncKeyState(key) < 0; }
         private static bool AnyMouseButtonDown()
@@ -777,8 +810,8 @@ namespace OrbitEvolved
             if (pressed)
             {
                 var pointer = Forms.Cursor.Position;
-                if (!new Rect(0, 0, Window.ActualWidth, Window.ActualHeight)
-                    .Contains(Window.PointFromScreen(new Point(pointer.X, pointer.Y))))
+                var bounds = Window.Clip == null ? new Rect(0, 0, Window.ActualWidth, Window.ActualHeight) : Window.Clip.Bounds;
+                if (!bounds.Contains(Window.PointFromScreen(new Point(pointer.X, pointer.Y))))
                 {
                     if (!MouseButtonDown(1) || !IsTaskbarPoint(pointer))
                     {
