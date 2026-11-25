@@ -2,7 +2,7 @@
 // @id orbit-evolved-taskbar
 // @name Orbit E(volved) Taskbar
 // @description Local Codex activity in the Windows 11 taskbar's Widgets area.
-// @version 0.1.2
+// @version 0.1.3
 // @author ArmaanLeg3nd
 // @github https://github.com/ArmaanLeg3nd/orbit-e
 // @include explorer.exe
@@ -23,7 +23,7 @@ Orbit E(volved).exe. With an empty setting the mod looks for it in
 %LOCALAPPDATA%\OrbitEvolved\Windhawk. The floating release uses a separate
 instance and can be closed independently.
 
-Use Settings to adjust the button width, show only the headline, or hide
+Use Settings to adjust the button width and position, show only the headline, or hide
 the button when there are no active chats or unread completions.
 
 The taskbar host lookup is adapted from the MIT-licensed
@@ -39,6 +39,12 @@ The taskbar host lookup is adapted from the MIT-licensed
 - buttonWidth: 144
   $name: Button width
   $description: Logical pixels (96–256). Orbit hides if the chosen width would overlap native buttons.
+- horizontalOffset: 4
+  $name: Horizontal offset
+  $description: Distance from the left edge in logical pixels (0–96).
+- verticalOffset: 0
+  $name: Vertical offset
+  $description: Move up with a negative value or down with a positive value (−16 to 16 logical pixels). The button stays inside the taskbar.
 - headlineOnly: false
   $name: Headline only
   $description: Hide the second line. The details remain in the tooltip.
@@ -73,7 +79,8 @@ constexpr wchar_t kShow[] = L"Local\\OrbitEvolved.Taskbar.Show";
 constexpr wchar_t kStop[] = L"Local\\OrbitEvolved.Taskbar.Stop";
 constexpr size_t kTextUnits = 256;
 constexpr int kDefaultButtonWidth = 144;
-constexpr double kButtonInset = 4;
+constexpr int kDefaultHorizontalOffset = 4;
+constexpr double kNativeButtonGap = 4;
 constexpr double kButtonHeight = 32;
 constexpr UINT_PTR kTimer = 0x4F524254;
 
@@ -91,6 +98,8 @@ UINT detachMessage;
 std::atomic<bool> stopping;
 std::atomic<bool> displaySettingsChanged{true};
 int buttonWidth = kDefaultButtonWidth;
+int horizontalOffset = kDefaultHorizontalOffset;
+int verticalOffset;
 bool headlineOnly;
 bool hideWhenIdle;
 Grid parentGrid{nullptr};
@@ -291,6 +300,8 @@ void RefreshTaskbar(HWND hwnd) {
     if (displaySettingsChanged.exchange(false)) {
         int width = Wh_GetIntSetting(L"buttonWidth");
         buttonWidth = width == 0 ? kDefaultButtonWidth : std::clamp(width, 96, 256);
+        horizontalOffset = std::clamp(Wh_GetIntSetting(L"horizontalOffset"), 0, 96);
+        verticalOffset = std::clamp(Wh_GetIntSetting(L"verticalOffset"), -16, 16);
         headlineOnly = Wh_GetIntSetting(L"headlineOnly") != 0;
         hideWhenIdle = Wh_GetIntSetting(L"hideWhenIdle") != 0;
     }
@@ -317,7 +328,6 @@ void RefreshTaskbar(HWND hwnd) {
         // A Canvas measures its children without contributing their size to the
         // taskbar grid. Its unset background also leaves native hit targets alone.
         Canvas slot;
-        Canvas::SetLeft(button, kButtonInset);
         Grid::SetColumn(slot, Grid::GetColumn(repeater));
         Grid::SetRow(slot, Grid::GetRow(repeater));
         Grid::SetColumnSpan(slot, Grid::GetColumnSpan(repeater));
@@ -343,14 +353,20 @@ void RefreshTaskbar(HWND hwnd) {
         grid.Children().Append(slot);
         Wh_Log(L"Attached Orbit to the primary taskbar XAML layout");
     }
-    if (!HasRoomForOrbit(repeater, buttonWidth + 2 * kButtonInset)) {
+    double slotWidth = horizontalOffset + buttonWidth + kNativeButtonGap;
+    if (!HasRoomForOrbit(repeater, slotWidth)) {
         orbitButton.Visibility(Visibility::Collapsed);
         return;
     }
     if (orbitButton.Width() != buttonWidth) orbitButton.Width(buttonWidth);
     auto captionVisibility = headlineOnly ? Visibility::Collapsed : Visibility::Visible;
     if (caption.Visibility() != captionVisibility) caption.Visibility(captionVisibility);
-    Canvas::SetTop(orbitButton, (orbitSlot.ActualHeight() - kButtonHeight) / 2);
+    double verticalSpace = orbitSlot.ActualHeight() - kButtonHeight;
+    double top = std::clamp(verticalSpace / 2 + verticalOffset, 0.0, verticalSpace);
+    if (Canvas::GetLeft(orbitButton) != horizontalOffset)
+        Canvas::SetLeft(orbitButton, horizontalOffset);
+    if (Canvas::GetTop(orbitButton) != top)
+        Canvas::SetTop(orbitButton, top);
     RefreshStatus();
 }
 
