@@ -2,7 +2,7 @@
 // @id orbit-evolved-taskbar
 // @name Orbit E(volved) Taskbar
 // @description Local Codex activity in the Windows 11 taskbar's Widgets area.
-// @version 0.1.1
+// @version 0.1.2
 // @author ArmaanLeg3nd
 // @github https://github.com/ArmaanLeg3nd/orbit-e
 // @include explorer.exe
@@ -23,6 +23,9 @@ Orbit E(volved).exe. With an empty setting the mod looks for it in
 %LOCALAPPDATA%\OrbitEvolved\Windhawk. The floating release uses a separate
 instance and can be closed independently.
 
+Use Settings to adjust the button width, show only the headline, or hide
+the button when there are no active chats or unread completions.
+
 The taskbar host lookup is adapted from the MIT-licensed
 [Taskbar Media Widget by uMk0](https://windhawk.net/mods/taskbar-media-widget).
 */
@@ -33,6 +36,15 @@ The taskbar host lookup is adapted from the MIT-licensed
 - companionPath: ""
   $name: Companion executable
   $description: Full path to Orbit E(volved).exe built from the orbit-windhawk branch.
+- buttonWidth: 144
+  $name: Button width
+  $description: Logical pixels (96–256). Orbit hides if the chosen width would overlap native buttons.
+- headlineOnly: false
+  $name: Headline only
+  $description: Hide the second line. The details remain in the tooltip.
+- hideWhenIdle: false
+  $name: Hide when idle
+  $description: Hide the button when there are no active chats or unread completions.
 */
 // ==/WindhawkModSettings==
 
@@ -46,6 +58,7 @@ The taskbar host lookup is adapted from the MIT-licensed
 #include <winrt/Windows.UI.Xaml.Controls.h>
 #include <winrt/Windows.UI.Xaml.Controls.Primitives.h>
 #include <winrt/Windows.UI.Xaml.Media.h>
+#include <algorithm>
 #include <atomic>
 #include <cstring>
 #include <string>
@@ -59,7 +72,8 @@ constexpr wchar_t kStatus[] = L"Local\\OrbitEvolved.Taskbar.Status";
 constexpr wchar_t kShow[] = L"Local\\OrbitEvolved.Taskbar.Show";
 constexpr wchar_t kStop[] = L"Local\\OrbitEvolved.Taskbar.Stop";
 constexpr size_t kTextUnits = 256;
-constexpr double kSlotWidth = 152;
+constexpr int kDefaultButtonWidth = 144;
+constexpr double kButtonInset = 4;
 constexpr double kButtonHeight = 32;
 constexpr UINT_PTR kTimer = 0x4F524254;
 
@@ -75,6 +89,10 @@ HANDLE worker;
 UINT attachMessage;
 UINT detachMessage;
 std::atomic<bool> stopping;
+std::atomic<bool> displaySettingsChanged{true};
+int buttonWidth = kDefaultButtonWidth;
+bool headlineOnly;
+bool hideWhenIdle;
 Grid parentGrid{nullptr};
 Canvas orbitSlot{nullptr};
 Button orbitButton{nullptr};
@@ -222,6 +240,11 @@ void RefreshStatus() {
         title = L"Orbit";
         detail = L"Open agent activity";
     }
+    // This headline is the idle state published by existing Orbit companions.
+    if (hideWhenIdle && title == L"No active chats") {
+        orbitButton.Visibility(Visibility::Collapsed);
+        return;
+    }
     if (headline.Text() != title) headline.Text(title);
     if (caption.Text() != detail) caption.Text(detail);
     auto accessible = L"Orbit: " + title + (detail.empty() ? L"" : L". " + detail);
@@ -229,6 +252,7 @@ void RefreshStatus() {
         Automation::AutomationProperties::SetName(orbitButton, accessible);
         ToolTipService::SetToolTip(orbitButton, box_value(hstring(accessible)));
     }
+    orbitButton.Visibility(Visibility::Visible);
 }
 
 void Detach() {
@@ -245,8 +269,8 @@ void Detach() {
     caption = nullptr;
 }
 
-bool HasRoomForOrbit(FrameworkElement const& repeater) {
-    if (orbitSlot.ActualWidth() < kSlotWidth || orbitSlot.ActualHeight() < kButtonHeight)
+bool HasRoomForOrbit(FrameworkElement const& repeater, double slotWidth) {
+    if (orbitSlot.ActualWidth() < slotWidth || orbitSlot.ActualHeight() < kButtonHeight)
         return false;
 
     int count = Media::VisualTreeHelper::GetChildrenCount(repeater);
@@ -257,13 +281,19 @@ bool HasRoomForOrbit(FrameworkElement const& repeater) {
             continue;
         auto bounds = item.TransformToVisual(orbitSlot).TransformBounds(
             {0, 0, static_cast<float>(item.ActualWidth()), static_cast<float>(item.ActualHeight())});
-        if (bounds.X < kSlotWidth && bounds.X + bounds.Width > 0)
+        if (bounds.X < slotWidth && bounds.X + bounds.Width > 0)
             return false;
     }
     return count > 0;
 }
 
 void RefreshTaskbar(HWND hwnd) {
+    if (displaySettingsChanged.exchange(false)) {
+        int width = Wh_GetIntSetting(L"buttonWidth");
+        buttonWidth = width == 0 ? kDefaultButtonWidth : std::clamp(width, 96, 256);
+        headlineOnly = Wh_GetIntSetting(L"headlineOnly") != 0;
+        hideWhenIdle = Wh_GetIntSetting(L"hideWhenIdle") != 0;
+    }
     auto xaml = FindTaskbarRoot(hwnd);
     auto frame = xaml ? FindElement(xaml.Content(), L"Taskbar.TaskbarFrame", true) : nullptr;
     auto repeater = FindElement(frame, L"TaskbarFrameRepeater");
@@ -280,7 +310,6 @@ void RefreshTaskbar(HWND hwnd) {
     if (!orbitButton) {
         Button button;
         button.Name(L"OrbitEvolvedTaskbarButton");
-        button.Width(kSlotWidth - 8);
         button.Height(kButtonHeight);
         button.Padding({6, 0, 6, 0});
         button.MinHeight(0);
@@ -288,7 +317,7 @@ void RefreshTaskbar(HWND hwnd) {
         // A Canvas measures its children without contributing their size to the
         // taskbar grid. Its unset background also leaves native hit targets alone.
         Canvas slot;
-        Canvas::SetLeft(button, 4);
+        Canvas::SetLeft(button, kButtonInset);
         Grid::SetColumn(slot, Grid::GetColumn(repeater));
         Grid::SetRow(slot, Grid::GetRow(repeater));
         Grid::SetColumnSpan(slot, Grid::GetColumnSpan(repeater));
@@ -314,12 +343,14 @@ void RefreshTaskbar(HWND hwnd) {
         grid.Children().Append(slot);
         Wh_Log(L"Attached Orbit to the primary taskbar XAML layout");
     }
-    if (!HasRoomForOrbit(repeater)) {
+    if (!HasRoomForOrbit(repeater, buttonWidth + 2 * kButtonInset)) {
         orbitButton.Visibility(Visibility::Collapsed);
         return;
     }
+    if (orbitButton.Width() != buttonWidth) orbitButton.Width(buttonWidth);
+    auto captionVisibility = headlineOnly ? Visibility::Collapsed : Visibility::Visible;
+    if (caption.Visibility() != captionVisibility) caption.Visibility(captionVisibility);
     Canvas::SetTop(orbitButton, (orbitSlot.ActualHeight() - kButtonHeight) / 2);
-    orbitButton.Visibility(Visibility::Visible);
     RefreshStatus();
 }
 
@@ -382,6 +413,10 @@ BOOL Wh_ModInit() {
 
 void Wh_ModAfterInit() {
     worker = CreateThread(nullptr, 0, WatchTaskbar, nullptr, 0, nullptr);
+}
+
+void Wh_ModSettingsChanged() {
+    displaySettingsChanged = true;
 }
 
 void Wh_ModUninit() {

@@ -11,7 +11,15 @@ The existing Orbit companion provides the live status and the Active, All, and w
 3. In Windhawk, select **Create a New Mod** and replace the generated source with **orbit-evolved-taskbar.wh.cpp**. Compile the mod, then enable it.
 4. Keep Windows Widgets off and set **Taskbar alignment** to **Center**. Click the Orbit status on the left of the primary taskbar to open the panel.
 
-To update a local installation, replace the existing mod's editor source and compile it again. The 0.1.1 layout fix works with the existing companion executable.
+To update a local installation, replace the existing mod's editor source and compile it again. Version 0.1.2 works with the existing companion executable.
+
+## Customize the taskbar button
+
+Open **Windhawk → Orbit E(volved) Taskbar → Settings**. Saved display changes apply on the next status refresh, usually within one second.
+
+- **Button width** defaults to 144 logical pixels. Choose 96–256. If there is too little free space, reduce the width.
+- **Headline only** hides the second line. Hover over the button to see the full status.
+- **Hide when idle** hides the whole button when there are no active chats or unread completions. Leave it off if you want to open archived or idle chats from the taskbar at any time.
 
 Windhawk starts the matching companion in the background. The companion can also be opened with the **--taskbar-open** argument for troubleshooting. Disable the mod in Windhawk to remove the taskbar control and stop the taskbar companion. The floating build has its own instance and remains available on the **orbit-evolved** branch.
 
