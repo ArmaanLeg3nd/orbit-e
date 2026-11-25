@@ -244,6 +244,9 @@ namespace OrbitEvolved
                     var panelSpinner = (FrameworkElement)liveWindow.FindName("PanelSpinner");
                     Check(panelSpinner.IsVisible && ((RotateTransform)panelSpinner.RenderTransform).HasAnimatedProperties == SystemParameters.ClientAreaAnimation,
                         "Working agents show the spinner and respect the system motion setting");
+                    var projectTitle = (TextBlock)liveWindow.FindName("ProjectLabel");
+                    Check(panelSpinner.TranslatePoint(new Point(), projectTitle).X < 0,
+                        "The expanded spinner is to the left of the project and status text");
                     Check(liveWindow.Resources.Contains("SlimBar"), "Slim scrollbar style replaces the wide system bar");
                     Check(System.Windows.Controls.VirtualizingStackPanel.GetIsVirtualizing(nativeTree), "Agent feed virtualizes bot cards");
                     Check(demo.Agents.All(a => !String.IsNullOrEmpty(a.StatusLabel)), "Agent rows show plain colored status text");
@@ -313,6 +316,10 @@ namespace OrbitEvolved
                     Check(liveWindow.Width == 260 && liveWindow.Height == 76 && ((FrameworkElement)liveWindow.FindName("PillView")).Visibility == Visibility.Visible, "Animated collapse reaches the smaller status pill");
                     Check(Math.Abs(liveWindow.Left + liveWindow.Width - right) < 1 && Math.Abs(liveWindow.Top + liveWindow.Height - bottom) < 1, "Collapse preserves the anchored screen corner");
                     Check(((Button)liveWindow.FindName("ExpandButton")).Focusable, "The collapsed pill is a keyboard-accessible native button");
+                    var pillSpinner = (FrameworkElement)liveWindow.FindName("PillSpinner");
+                    var pillTitle = (TextBlock)liveWindow.FindName("PillTitle");
+                    Check(pillSpinner.IsVisible && pillSpinner.TranslatePoint(new Point(), pillTitle).X < 0,
+                        "The pill spinner is to the left of the status text");
                     Render(liveWindow, Path.Combine(root, "pill.png"));
                     Press(liveWindow, "ExpandButton"); Pump(600);
                     Check(liveWindow.Width == 380, "The pill's invoke action expands the widget");
