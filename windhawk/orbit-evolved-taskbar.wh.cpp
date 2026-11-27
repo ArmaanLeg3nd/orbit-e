@@ -2,7 +2,7 @@
 // @id orbit-evolved-taskbar
 // @name Orbit E(volved) Taskbar
 // @description Local Codex activity in the Windows 11 taskbar's Widgets area.
-// @version 0.1.6
+// @version 0.1.7
 // @author ArmaanLeg3nd
 // @github https://github.com/ArmaanLeg3nd/orbit-e
 // @include explorer.exe
@@ -61,6 +61,7 @@ The taskbar host lookup is adapted from the MIT-licensed
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.UI.Composition.h>
+#include <winrt/Windows.UI.Text.h>
 #include <winrt/Windows.UI.Xaml.Automation.h>
 #include <winrt/Windows.UI.Xaml.Controls.h>
 #include <winrt/Windows.UI.Xaml.Controls.Primitives.h>
@@ -116,6 +117,9 @@ Shapes::Path activityArc{nullptr};
 Windows::UI::Composition::Visual activityVisual{nullptr};
 Windows::UI::Composition::ScalarKeyFrameAnimation activityRotation{nullptr};
 bool activitySpinning;
+bool chromeInitialized;
+bool chromeHighContrast;
+ElementTheme chromeTheme = ElementTheme::Default;
 event_token clicked{};
 ULONGLONG nextLaunch;
 
@@ -275,6 +279,10 @@ void ShowActivity(wchar_t activity) {
         SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &systemAnimations, 0);
     bool spin = activity == 3 && systemAnimations;
     auto visibility = activity == 2 || activity == 3 ? Visibility::Visible : Visibility::Collapsed;
+    if (visibility == Visibility::Visible) {
+        auto foreground = orbitButton.Foreground();
+        if (activityArc.Stroke() != foreground) activityArc.Stroke(foreground);
+    }
     if (activityArc.Visibility() != visibility) activityArc.Visibility(visibility);
     if (spin != activitySpinning) {
         if (spin) {
@@ -287,7 +295,36 @@ void ShowActivity(wchar_t activity) {
     }
 }
 
-void AddActivityArc(Grid const& content, Button const& button) {
+void RefreshButtonChrome() {
+    HIGHCONTRASTW contrast{};
+    contrast.cbSize = sizeof(contrast);
+    bool highContrast = SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast), &contrast, 0) &&
+        (contrast.dwFlags & HCF_HIGHCONTRASTON);
+    auto theme = orbitButton.ActualTheme();
+    if (chromeInitialized && chromeHighContrast == highContrast && chromeTheme == theme)
+        return;
+
+    if (highContrast) {
+        orbitButton.ClearValue(Control::BackgroundProperty());
+        orbitButton.ClearValue(Control::BorderBrushProperty());
+        orbitButton.ClearValue(Control::BorderThicknessProperty());
+        caption.Opacity(1);
+    } else {
+        // A faint tint on the taskbar, with the button's native hover, focus,
+        // and pressed visuals still supplied by the Windows button template.
+        bool dark = theme == ElementTheme::Dark;
+        uint8_t tint = dark ? 255 : 0;
+        orbitButton.Background(Media::SolidColorBrush(Windows::UI::Color{dark ? uint8_t{12} : uint8_t{8}, tint, tint, tint}));
+        orbitButton.BorderBrush(Media::SolidColorBrush(Windows::UI::Color{dark ? uint8_t{24} : uint8_t{18}, tint, tint, tint}));
+        orbitButton.BorderThickness({1, 1, 1, 1});
+        caption.Opacity(0.8);
+    }
+    chromeInitialized = true;
+    chromeHighContrast = highContrast;
+    chromeTheme = theme;
+}
+
+void AddActivityArc(Grid const& content) {
     // Match Widget.xaml's 14 px rounded arc and the WPF widget's linear rotation.
     Media::ArcSegment segment;
     segment.Point({1, 7});
@@ -302,7 +339,6 @@ void AddActivityArc(Grid const& content, Button const& button) {
 
     Shapes::Path arc;
     arc.Data(geometry);
-    arc.Stroke(button.Foreground());
     arc.StrokeThickness(1.6);
     arc.StrokeStartLineCap(Media::PenLineCap::Round);
     arc.StrokeEndLineCap(Media::PenLineCap::Round);
@@ -348,6 +384,7 @@ void Detach() {
         catch (...) { Wh_Log(L"Could not stop the Orbit activity arc"); }
     }
     activitySpinning = false;
+    chromeInitialized = false;
     if (orbitButton) orbitButton.Click(clicked);
     if (parentGrid && orbitSlot) {
         uint32_t index;
@@ -410,6 +447,9 @@ void RefreshTaskbar(HWND hwnd) {
         button.Height(kButtonHeight);
         button.MinHeight(0);
         button.HorizontalContentAlignment(HorizontalAlignment::Stretch);
+        button.VerticalContentAlignment(VerticalAlignment::Center);
+        button.CornerRadius({7, 7, 7, 7});
+        button.UseSystemFocusVisuals(true);
         button.Visibility(Visibility::Collapsed);
         // A Canvas measures its children without contributing their size to the
         // taskbar grid. Its unset background also leaves native hit targets alone.
@@ -424,6 +464,7 @@ void RefreshTaskbar(HWND hwnd) {
         headline = TextBlock();
         caption = TextBlock();
         headline.FontSize(12);
+        headline.FontWeight(Windows::UI::Text::FontWeights::SemiBold());
         caption.FontSize(10);
         caption.Opacity(0.8);
         headline.TextTrimming(TextTrimming::CharacterEllipsis);
@@ -439,7 +480,7 @@ void RefreshTaskbar(HWND hwnd) {
         content.ColumnDefinitions().Append(textColumn);
         Grid::SetColumn(label, 1);
         content.Children().Append(label);
-        AddActivityArc(content, button);
+        AddActivityArc(content);
         button.Content(content);
         clicked = button.Click([](auto const&, auto const&) {
             try { StartCompanion(true); } catch (...) { Wh_Log(L"Could not open Orbit"); }
@@ -459,7 +500,7 @@ void RefreshTaskbar(HWND hwnd) {
     }
     if (orbitButton.Width() != buttonWidth) orbitButton.Width(buttonWidth);
     // Keep the spinner and text in the visible part of a negatively offset button.
-    Thickness padding{6.0 + std::max(0, -left), 0, 6, 0};
+    Thickness padding{8.0 + std::max(0, -left), 0, 8, 0};
     if (orbitButton.Padding() != padding) orbitButton.Padding(padding);
     auto captionVisibility = headlineOnly ? Visibility::Collapsed : Visibility::Visible;
     if (caption.Visibility() != captionVisibility) caption.Visibility(captionVisibility);
@@ -469,6 +510,7 @@ void RefreshTaskbar(HWND hwnd) {
         Canvas::SetLeft(orbitButton, left);
     if (Canvas::GetTop(orbitButton) != top)
         Canvas::SetTop(orbitButton, top);
+    RefreshButtonChrome();
     RefreshStatus();
 }
 

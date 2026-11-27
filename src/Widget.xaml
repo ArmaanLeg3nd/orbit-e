@@ -112,24 +112,24 @@
   </Window.Resources>
   <Grid Margin="12" x:Name="Root">
     <Border x:Name="Surface" CornerRadius="15" BorderThickness="1">
-      <Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="0.4,1"><GradientStop Color="#C8343434" Offset="0"/><GradientStop Color="#D0212121" Offset="0.45"/><GradientStop Color="#D5181818" Offset="1"/></LinearGradientBrush></Border.Background>
-      <Border.BorderBrush><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#70FFFFFF" Offset="0"/><GradientStop Color="#28FFFFFF" Offset="0.5"/><GradientStop Color="#3AFFFFFF" Offset="1"/></LinearGradientBrush></Border.BorderBrush>
+      <Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="0.28,1"><GradientStop Color="#D82A2A2A" Offset="0"/><GradientStop Color="#DF212121" Offset="0.48"/><GradientStop Color="#E41A1A1A" Offset="1"/></LinearGradientBrush></Border.Background>
+      <Border.BorderBrush><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#54FFFFFF" Offset="0"/><GradientStop Color="#20FFFFFF" Offset="0.55"/><GradientStop Color="#32FFFFFF" Offset="1"/></LinearGradientBrush></Border.BorderBrush>
       <Border.Effect><DropShadowEffect BlurRadius="20" ShadowDepth="4" Opacity="0.3" Color="#000000"/></Border.Effect>
       <Grid>
         <Grid x:Name="ExpandedView" Margin="11,0">
-          <Grid.RowDefinitions><RowDefinition Height="50"/><RowDefinition Height="*"/><RowDefinition Height="30"/></Grid.RowDefinitions>
+          <Grid.RowDefinitions><RowDefinition Height="54"/><RowDefinition Height="*"/><RowDefinition Height="34"/></Grid.RowDefinitions>
           <Grid x:Name="DragHeader" Background="Transparent" Cursor="SizeAll"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <Border Grid.ColumnSpan="2" BorderBrush="#22FFFFFF" BorderThickness="0,0,0,1"/>
+            <Border Grid.ColumnSpan="2" BorderBrush="#16FFFFFF" BorderThickness="0,0,0,1"/>
             <DockPanel VerticalAlignment="Center" Margin="1,0,9,0">
               <Path x:Name="PanelSpinner" DockPanel.Dock="Left" Style="{StaticResource WorkingSpinner}" Margin="0,0,7,0"><Path.RenderTransform><RotateTransform/></Path.RenderTransform></Path>
               <StackPanel>
-                <TextBlock x:Name="ProjectLabel" Text="subagent-view" Foreground="#F4F6FB" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                <TextBlock x:Name="SummaryTitle" Text="Waiting for agents" Foreground="#AEB7C5" FontSize="10" Margin="0,3,0,0"/>
+                <TextBlock x:Name="ProjectLabel" Text="subagent-view" Foreground="#F4F6FB" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                <TextBlock x:Name="SummaryTitle" Text="Waiting for agents" Foreground="#BCC4D0" FontSize="11" Margin="0,3,0,0"/>
               </StackPanel>
             </DockPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"><Button x:Name="SettingsButton" Style="{StaticResource IconButton}" ToolTip="Settings" AutomationProperties.Name="Widget settings"><TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE713;" FontSize="12"/></Button><Button x:Name="CollapseButton" Style="{StaticResource IconButton}" ToolTip="Collapse · Esc" AutomationProperties.Name="Collapse widget"><Path Data="M 0,0 L 9,0" Stroke="#C4C4C4" StrokeThickness="1"/></Button></StackPanel>
           </Grid>
-          <Grid Grid.Row="1" Margin="-3,5,-3,5" x:Name="ContentArea">
+          <Grid Grid.Row="1" Margin="-3,8,-3,6" x:Name="ContentArea">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
             <StackPanel x:Name="CatalogTools" Orientation="Horizontal" Visibility="Collapsed" Margin="3,0,4,6">
               <Button x:Name="AllChatsButton" Style="{StaticResource TextButton}" Content="All"/>
@@ -139,12 +139,12 @@
             <StackPanel Grid.Row="1" x:Name="EmptyState" Visibility="Collapsed" VerticalAlignment="Center" Margin="22,0"><TextBlock x:Name="EmptyHeading" Text="No agents yet" FontSize="15" FontWeight="SemiBold"/><TextBlock x:Name="EmptyDescription" Text="Activity will appear here as your team starts working." Foreground="#BDBDBD" FontSize="12" TextWrapping="Wrap" Margin="0,8,0,12"/><Button x:Name="PreviewButton" Content="Preview the widget" Style="{StaticResource TextButton}" Background="#15FFFFFF" HorizontalAlignment="Left"/></StackPanel>
           </Grid>
           <Grid Grid.Row="2" x:Name="Footer">
-            <Border BorderBrush="#22FFFFFF" BorderThickness="0,1,0,0"/>
+            <Border BorderBrush="#16FFFFFF" BorderThickness="0,1,0,0"/>
             <Grid>
               <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
               <TextBlock x:Name="SourceLabel" Text="Local activity" Foreground="#B0B0B0" FontSize="10" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="1,0,6,0"/>
               <Button x:Name="ChatFilesButton" Visibility="Collapsed" Grid.Column="1" Content="Files" Style="{StaticResource TextButton}" FontSize="10" Height="25" ToolTip="Files changed in this chat"/>
-              <Button x:Name="GraphButton" Grid.Column="2" Content="Graph" Style="{StaticResource TextButton}" FontSize="10" Height="25" Visibility="Collapsed" ToolTip="Open the agent workflow graph" AutomationProperties.Name="Open agent workflow graph"/>
+              <Button x:Name="GraphButton" Grid.Column="2" Content="Graph" Style="{StaticResource TextButton}" Background="#16FFFFFF" FontSize="10" Height="25" Visibility="Collapsed" ToolTip="Open the agent workflow graph" AutomationProperties.Name="Open agent workflow graph"/>
               <Button x:Name="SourceButton" Grid.Column="3" Content="Codex" Style="{StaticResource TextButton}" FontSize="10" Height="25"/>
             </Grid>
           </Grid>
@@ -169,6 +169,7 @@
             </StackPanel>
           </ScrollViewer>
           <Grid Grid.Row="3">
+            <Border BorderBrush="#16FFFFFF" BorderThickness="0,1,0,0"/>
             <Button x:Name="CopyButton" Content="Copy activity" Style="{StaticResource TextButton}" HorizontalAlignment="Left" Margin="-8,0,0,0" FontSize="11"/>
             <Button x:Name="ToggleReadsButton" Content="Show file reads" Style="{StaticResource TextButton}" HorizontalAlignment="Right" Margin="0,0,-8,0" FontSize="11" Visibility="Collapsed"/>
           </Grid>

@@ -30,15 +30,15 @@ namespace OrbitEvolved
         private const double ColumnPitch = 243;
         private const double RowPitch = 110;
         private const double GraphInset = 24;
-        private static readonly Brush PanelSurface = Palette.Color("#16FFFFFF");
-        private static readonly Brush Board = Palette.Color("#28000000");
-        private static readonly Brush CardSurface = Palette.Color("#D22B2B2B");
-        private static readonly Brush SelectedSurface = Palette.Color("#D437424F");
-        private static readonly Brush Primary = Palette.Color("#F3F3F3");
-        private static readonly Brush Secondary = Palette.Color("#C6CBD3");
-        private static readonly Brush Muted = Palette.Color("#A5AAB4");
-        private static readonly Brush Outline = Palette.Color("#29FFFFFF");
-        private static readonly Brush SelectedOutline = Palette.Color("#9EBFE7");
+        private static readonly Brush PanelSurface = Palette.Color("#10FFFFFF");
+        private static readonly Brush Board = Palette.Color("#40101418");
+        private static readonly Brush CardSurface = Palette.Color("#F02B2D31");
+        private static readonly Brush SelectedSurface = Palette.Color("#F037424F");
+        private static readonly Brush Primary = Palette.Color("#F4F6FB");
+        private static readonly Brush Secondary = Palette.Color("#C6CDD7");
+        private static readonly Brush Muted = Palette.Color("#B2BBC8");
+        private static readonly Brush Outline = Palette.Color("#23FFFFFF");
+        private static readonly Brush SelectedOutline = Palette.Color("#B5A8C8EC");
         private static readonly Brush Attention = Palette.Color("#E5BE89");
         private static readonly Style CardStyle = CreateCardStyle();
 
@@ -130,15 +130,15 @@ namespace OrbitEvolved
             frame = new Grid { Margin = new Thickness(12), RenderTransform = entrance };
             root.Children.Add(frame);
             glass = new Border {
-                Background = new LinearGradientBrush(Color.FromArgb(200, 52, 52, 52), Color.FromArgb(213, 24, 24, 24), 65),
-                BorderBrush = Palette.Color("#55FFFFFF"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(15),
+                Background = new LinearGradientBrush(Color.FromArgb(216, 42, 42, 42), Color.FromArgb(228, 26, 26, 26), 65),
+                BorderBrush = Palette.Color("#54FFFFFF"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(15),
                 Effect = new DropShadowEffect { BlurRadius = 20, ShadowDepth = 4, Opacity = 0.3 },
                 IsHitTestVisible = false
             };
             frame.Children.Add(glass);
             var view = new DockPanel { LastChildFill = true, Margin = new Thickness(20, 12, 20, 17) };
             frame.Children.Add(view);
-            var header = new Grid { Background = Brushes.Transparent, Margin = new Thickness(0, 0, 0, 13) };
+            var header = new Grid { Background = Brushes.Transparent, Margin = new Thickness(0, 0, 0, 16) };
             header.ColumnDefinitions.Add(new ColumnDefinition());
             header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             DockPanel.SetDock(header, Dock.Top);
@@ -146,7 +146,7 @@ namespace OrbitEvolved
             header.MouseLeftButtonDown += DragHeader;
 
             var headings = new StackPanel { Margin = new Thickness(1, 4, 12, 0) };
-            headings.Children.Add(Label("Agent workflow", 21, Primary, FontWeights.SemiBold));
+            headings.Children.Add(Label("Agent workflow", 22, Primary, FontWeights.SemiBold));
             chatHeading = Label("", 12, Secondary, FontWeights.Normal);
             chatHeading.TextTrimming = TextTrimming.CharacterEllipsis;
             chatHeading.Margin = new Thickness(0, 3, 0, 0);
@@ -193,7 +193,7 @@ namespace OrbitEvolved
             var graphHeader = new DockPanel { Margin = new Thickness(13, 10, 13, 10) };
             DockPanel.SetDock(graphHeader, Dock.Top);
             graphPanel.Children.Add(graphHeader);
-            graphHeader.Children.Add(Label("Delegation graph", 13, Primary, FontWeights.SemiBold));
+            graphHeader.Children.Add(Label("Delegation graph", 12, Primary, FontWeights.SemiBold));
             graphCount = Label("", 11, Secondary, FontWeights.Normal);
             graphCount.HorizontalAlignment = HorizontalAlignment.Right;
             graphCount.VerticalAlignment = VerticalAlignment.Center;
@@ -849,7 +849,7 @@ namespace OrbitEvolved
 
         private static Border Section()
         {
-            return new Border { Background = PanelSurface, BorderBrush = Outline, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10) };
+            return new Border { Background = PanelSurface, BorderBrush = Outline, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(11) };
         }
 
         private static Button HeaderButton(Geometry geometry, string name, Action click)
@@ -887,7 +887,7 @@ namespace OrbitEvolved
         {
             var group = new DrawingGroup();
             group.Children.Add(new GeometryDrawing(Board, null, new RectangleGeometry(new Rect(0, 0, 18, 18))));
-            group.Children.Add(new GeometryDrawing(Palette.Color("#26FFFFFF"), null, new EllipseGeometry(new Point(9, 9), 0.85, 0.85)));
+            group.Children.Add(new GeometryDrawing(Palette.Color("#18FFFFFF"), null, new EllipseGeometry(new Point(9, 9), 0.7, 0.7)));
             var brush = new DrawingBrush(group) { TileMode = TileMode.Tile, Viewport = new Rect(0, 0, 18, 18), ViewportUnits = BrushMappingMode.Absolute };
             brush.Freeze();
             return brush;
